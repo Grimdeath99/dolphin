@@ -50,6 +50,10 @@ namespace GPFifo
 {
 class GPFifoManager;
 }
+namespace GraphicsModEditor
+{
+class EditorMain;
+}
 namespace HSP
 {
 class HSPManager;
@@ -157,6 +161,7 @@ public:
   VertexShaderManager& GetVertexShaderManager() const;
   VideoInterface::VideoInterfaceManager& GetVideoInterface() const;
   VideoCommon::CustomAssetLoader& GetCustomAssetLoader() const;
+  GraphicsModEditor::EditorMain& GetGraphicsModEditor() const;
 
 private:
   System();
