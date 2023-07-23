@@ -62,6 +62,28 @@ add_library(videocommon
   GeometryShaderGen.h
   GeometryShaderManager.cpp
   GeometryShaderManager.h
+  GraphicsModEditor/Controls/AssetDisplay.cpp
+  GraphicsModEditor/Controls/AssetDisplay.h
+  GraphicsModEditor/Controls/MaterialControl.cpp
+  GraphicsModEditor/Controls/MaterialControl.h
+  GraphicsModEditor/Controls/ShaderControl.cpp
+  GraphicsModEditor/Controls/ShaderControl.h
+  GraphicsModEditor/Controls/TextureControl.cpp
+  GraphicsModEditor/Controls/TextureControl.h
+  GraphicsModEditor/EditorAssetSource.cpp
+  GraphicsModEditor/EditorAssetSource.h
+  GraphicsModEditor/EditorEvents.h
+  GraphicsModEditor/EditorMain.cpp
+  GraphicsModEditor/EditorMain.h
+  GraphicsModEditor/EditorState.cpp
+  GraphicsModEditor/EditorState.h
+  GraphicsModEditor/EditorTypes.h
+  GraphicsModEditor/Panels/ActiveTargetsPanel.cpp
+  GraphicsModEditor/Panels/ActiveTargetsPanel.h
+  GraphicsModEditor/Panels/AssetBrowserPanel.cpp
+  GraphicsModEditor/Panels/AssetBrowserPanel.h
+  GraphicsModEditor/Panels/PropertiesPanel.cpp
+  GraphicsModEditor/Panels/PropertiesPanel.h
   GraphicsModSystem/Config/GraphicsMod.cpp
   GraphicsModSystem/Config/GraphicsMod.h
   GraphicsModSystem/Config/GraphicsModAsset.cpp
