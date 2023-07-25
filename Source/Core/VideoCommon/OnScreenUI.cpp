@@ -10,11 +10,13 @@
 #include "Core/Config/MainSettings.h"
 #include "Core/Config/NetplaySettings.h"
 #include "Core/Movie.h"
+#include "Core/System.h"
 
 #include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/AbstractPipeline.h"
 #include "VideoCommon/AbstractShader.h"
 #include "VideoCommon/FramebufferShaderGen.h"
+#include "VideoCommon/GraphicsModEditor/EditorMain.h"
 #include "VideoCommon/NetPlayChatUI.h"
 #include "VideoCommon/NetPlayGolfUI.h"
 #include "VideoCommon/OnScreenDisplay.h"
@@ -304,6 +306,13 @@ void OnScreenUI::DrawDebugText()
         ImGui::TextUnformatted(Movie::GetRerecords().c_str());
     }
     ImGui::End();
+  }
+
+  auto& system = Core::System::GetInstance();
+  auto& graphics_mod_editor = system.GetGraphicsModEditor();
+  if (graphics_mod_editor.IsEnabled())
+  {
+    graphics_mod_editor.DrawImGui();
   }
 
   if (g_ActiveConfig.bOverlayStats)
