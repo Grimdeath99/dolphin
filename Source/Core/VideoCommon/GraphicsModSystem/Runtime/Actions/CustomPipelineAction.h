@@ -29,12 +29,17 @@ public:
   static std::unique_ptr<CustomPipelineAction>
   Create(const picojson::value& json_data,
          std::shared_ptr<VideoCommon::CustomAssetLibrary> library);
+  static std::unique_ptr<CustomPipelineAction>
+  Create(std::shared_ptr<VideoCommon::CustomAssetLibrary> library);
+  explicit CustomPipelineAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library);
   CustomPipelineAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library,
                        std::vector<PipelinePassPassDescription> pass_descriptions);
   ~CustomPipelineAction();
   void OnTextureLoad(GraphicsModActionData::TextureLoad*) override;
   void OnDrawStarted(GraphicsModActionData::DrawStarted*) override;
   void OnTextureCreate(GraphicsModActionData::TextureCreate*) override;
+
+  void DrawImGui() override;
 
 private:
   std::shared_ptr<VideoCommon::CustomAssetLibrary> m_library;
