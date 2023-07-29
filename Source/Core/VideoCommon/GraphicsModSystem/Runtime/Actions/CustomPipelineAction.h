@@ -4,6 +4,7 @@
 #pragma once
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -29,12 +30,17 @@ public:
   static std::unique_ptr<CustomPipelineAction>
   Create(const picojson::value& json_data,
          std::shared_ptr<VideoCommon::CustomAssetLibrary> library);
+  static std::unique_ptr<CustomPipelineAction>
+  Create(std::shared_ptr<VideoCommon::CustomAssetLibrary> library);
+  explicit CustomPipelineAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library);
   CustomPipelineAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library,
                        std::vector<PipelinePassPassDescription> pass_descriptions);
   ~CustomPipelineAction();
-  void OnTextureLoad(GraphicsModActionData::TextureLoad*) override;
   void OnDrawStarted(GraphicsModActionData::DrawStarted*) override;
-  void OnTextureCreate(GraphicsModActionData::TextureCreate*) override;
+
+  void DrawImGui() override;
+  void SerializeToConfig(picojson::object* obj) override;
+  std::string GetFactoryName() const override;
 
 private:
   std::shared_ptr<VideoCommon::CustomAssetLibrary> m_library;
@@ -43,14 +49,18 @@ private:
   {
     VideoCommon::CachedAsset<VideoCommon::MaterialAsset> m_pixel_material;
     VideoCommon::CachedAsset<VideoCommon::PixelShaderAsset> m_pixel_shader;
-    std::vector<VideoCommon::CachedAsset<VideoCommon::GameTextureAsset>> m_game_textures;
+
+    struct CachedTextureAsset
+    {
+      VideoCommon::CachedAsset<VideoCommon::GameTextureAsset> m_cached_asset;
+      std::unique_ptr<AbstractTexture> m_texture;
+      std::string m_sampler_code;
+      std::string m_define_code;
+    };
+    std::vector<std::optional<CachedTextureAsset>> m_game_textures;
   };
   std::vector<PipelinePass> m_passes;
 
   ShaderCode m_last_generated_shader_code;
 
-  bool m_valid = true;
-  bool m_trigger_texture_reload = true;
-
-  std::vector<std::string> m_texture_code_names;
 };
