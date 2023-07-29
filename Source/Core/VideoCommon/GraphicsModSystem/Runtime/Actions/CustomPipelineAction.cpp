@@ -7,6 +7,8 @@
 #include <array>
 
 #include <fmt/format.h>
+#include <imgui.h>
+#include <misc/cpp/imgui_stdlib.h>
 
 #include "Common/FileUtil.h"
 #include "Common/Logging/Log.h"
@@ -192,6 +194,12 @@ void WriteDefines(ShaderCode* out, const std::vector<std::string>& texture_code_
 }  // namespace
 
 std::unique_ptr<CustomPipelineAction>
+CustomPipelineAction::Create(std::shared_ptr<VideoCommon::CustomAssetLibrary> library)
+{
+  return std::make_unique<CustomPipelineAction>(std::move(library));
+}
+
+std::unique_ptr<CustomPipelineAction>
 CustomPipelineAction::Create(const picojson::value& json_data,
                              std::shared_ptr<VideoCommon::CustomAssetLibrary> library)
 {
@@ -247,6 +255,11 @@ CustomPipelineAction::Create(const picojson::value& json_data,
   }
 
   return std::make_unique<CustomPipelineAction>(std::move(library), std::move(pipeline_passes));
+}
+
+CustomPipelineAction::CustomPipelineAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library)
+    : m_library(std::move(library))
+{
 }
 
 CustomPipelineAction::CustomPipelineAction(
@@ -487,4 +500,51 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
 
   create->custom_textures->insert(create->custom_textures->end(), pass.m_game_textures.begin(),
                                   pass.m_game_textures.end());
+}
+
+void CustomPipelineAction::DrawImGui()
+{
+  if (ImGui::CollapsingHeader("Custom pipeline", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    if (m_passes_config.size() == 1)
+    {
+      if (ImGui::BeginTable("CustomPipelineForm", 2))
+      {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::Text("Material");
+        ImGui::TableNextColumn();
+        ImGui::InputText("##CustomPipelineMaterialAsset",
+                         &m_passes_config[0].m_pixel_material_asset);
+        if (ImGui::BeginDragDropTarget())
+        {
+          if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("MaterialAsset"))
+          {
+            VideoCommon::CustomAssetLibrary::AssetID asset_id(
+                static_cast<const char*>(payload->Data), payload->DataSize);
+            m_passes_config[0].m_pixel_material_asset = std::move(asset_id);
+            m_trigger_texture_reload = true;
+          }
+          ImGui::EndDragDropTarget();
+        }
+        ImGui::EndTable();
+      }
+    }
+
+    if (m_passes_config.empty())
+    {
+      if (ImGui::Button("Add pass"))
+      {
+        m_passes_config.emplace_back();
+        m_passes.emplace_back();
+      }
+    }
+    else
+    {
+      // Disable pass adding for now
+      ImGui::BeginDisabled();
+      ImGui::Button("Add pass");
+      ImGui::EndDisabled();
+    }
+  }
 }
