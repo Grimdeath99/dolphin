@@ -267,6 +267,9 @@ void CustomPipelineAction::OnDrawStarted(GraphicsModActionData::DrawStarted* dra
   if (!draw_started->custom_pixel_shader) [[unlikely]]
     return;
 
+  if (!draw_started->material_uniform_buffer) [[unlikely]]
+    return;
+
   if (!m_valid)
     return;
 
@@ -322,7 +325,9 @@ void CustomPipelineAction::OnDrawStarted(GraphicsModActionData::DrawStarted* dra
     }
     CustomPixelShader custom_pixel_shader;
     custom_pixel_shader.custom_shader = m_last_generated_shader_code.GetBuffer();
+    custom_pixel_shader.material_uniform_block = m_last_generated_material_code.GetBuffer();
     *draw_started->custom_pixel_shader = custom_pixel_shader;
+    *draw_started->material_uniform_buffer = m_material_data;
   }
 }
 
@@ -360,12 +365,20 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
   if (!material_data)
     return;
 
+  std::size_t max_material_data_size = 0;
   if (!pass.m_pixel_shader.m_asset || pass.m_pixel_material.m_asset->GetLastLoadedTime() >
                                           pass.m_pixel_material.m_cached_write_time)
   {
     m_last_generated_shader_code = ShaderCode{};
+    m_last_generated_material_code = ShaderCode{};
     pass.m_pixel_shader.m_asset = loader.LoadPixelShader(material_data->shader_asset, m_library);
     pass.m_pixel_shader.m_cached_write_time = pass.m_pixel_shader.m_asset->GetLastLoadedTime();
+    for (const auto& property : material_data->properties)
+    {
+      max_material_data_size += VideoCommon::MaterialProperty::GetMemorySize(property);
+      VideoCommon::MaterialProperty::WriteAsShaderCode(m_last_generated_material_code, property);
+    }
+    m_material_data.resize(max_material_data_size);
   }
   create->additional_dependencies->push_back(VideoCommon::CachedAsset<VideoCommon::CustomAsset>{
       pass.m_pixel_shader.m_asset, pass.m_pixel_shader.m_asset->GetLastLoadedTime()});
@@ -379,6 +392,7 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
 
   m_texture_code_names.clear();
   std::vector<VideoCommon::CachedAsset<VideoCommon::GameTextureAsset>> game_assets;
+  u8* material_buffer = m_material_data.data();
   for (const auto& property : material_data->properties)
   {
     const auto shader_it = shader_data->m_properties.find(property.m_code_name);
@@ -393,11 +407,13 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
       return;
     }
 
-    if (property.m_type == VideoCommon::MaterialProperty::Type::Type_TextureAsset)
+    // TODO: Compare shader and material type
+
+    if (property.m_value)
     {
-      if (property.m_value)
+      if (property.m_type == VideoCommon::MaterialProperty::Type::Type_TextureAsset)
       {
-        if (auto* value = std::get_if<std::string>(&*property.m_value))
+        if (auto* value = std::get_if<VideoCommon::CustomAssetLibrary::AssetID>(&*property.m_value))
         {
           auto asset = loader.LoadGameTexture(*value, m_library);
           if (asset)
@@ -408,6 +424,10 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
             m_texture_code_names.push_back(property.m_code_name);
           }
         }
+      }
+      else
+      {
+        VideoCommon::MaterialProperty::WriteToMemory(material_buffer, property);
       }
     }
   }
