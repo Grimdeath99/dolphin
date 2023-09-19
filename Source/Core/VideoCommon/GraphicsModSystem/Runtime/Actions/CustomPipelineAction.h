@@ -47,8 +47,10 @@ private:
   std::vector<PipelinePass> m_passes;
 
   ShaderCode m_last_generated_shader_code;
+  ShaderCode m_last_generated_material_code;
 
   bool m_valid = true;
 
   std::vector<std::string> m_texture_code_names;
+  std::vector<u8> m_material_data;
 };
