@@ -1280,7 +1280,35 @@ TCacheEntry* TextureCacheBase::Load(const TextureInfo& texture_info)
 {
   if (auto entry = LoadImpl(texture_info, false))
   {
-    if (!DidLinkedAssetsChange(*entry))
+    bool force_reload = false;
+    if (g_ActiveConfig.bGraphicMods)
+    {
+      if (entry->texture_info_name.empty())
+      {
+        entry->texture_info_name = texture_info.CalculateTextureName().GetFullName();
+      }
+
+      GraphicsModActionData::TextureLoad texture_load{entry->texture_info_name, &force_reload};
+      auto& system = Core::System::GetInstance();
+      auto& editor = system.GetGraphicsModEditor();
+      if (editor.IsEnabled())
+      {
+        for (const auto& action : editor.GetTextureLoadActions(entry->texture_info_name))
+        {
+          action->OnTextureLoad(&texture_load);
+        }
+      }
+      else
+      {
+        for (const auto& action :
+             g_graphics_mod_manager->GetTextureLoadActions(entry->texture_info_name))
+        {
+          action->OnTextureLoad(&texture_load);
+        }
+      }
+    }
+
+    if (!force_reload && !DidLinkedAssetsChange(*entry))
     {
       return entry;
     }
@@ -1327,29 +1355,6 @@ TCacheEntry* TextureCacheBase::LoadImpl(const TextureInfo& texture_info, bool fo
     return nullptr;
 
   entry->frameCount = FRAMECOUNT_INVALID;
-  if (entry->texture_info_name.empty() && g_ActiveConfig.bGraphicMods)
-  {
-    entry->texture_info_name = texture_info.CalculateTextureName().GetFullName();
-
-    GraphicsModActionData::TextureLoad texture_load{entry->texture_info_name};
-    auto& system = Core::System::GetInstance();
-    auto& editor = system.GetGraphicsModEditor();
-    if (editor.IsEnabled())
-    {
-      for (const auto& action : editor.GetTextureLoadActions(entry->texture_info_name))
-      {
-        action->OnTextureLoad(&texture_load);
-      }
-    }
-    else
-    {
-      for (const auto& action :
-           g_graphics_mod_manager->GetTextureLoadActions(entry->texture_info_name))
-      {
-        action->OnTextureLoad(&texture_load);
-      }
-    }
-  }
   m_bound_textures[texture_info.GetStage()] = entry;
 
   // We need to keep track of invalided textures until they have actually been replaced or
