@@ -40,6 +40,7 @@ struct Projection
 struct TextureLoad
 {
   std::string_view texture_name;
+  bool* force_texture_reload;
 };
 struct TextureCreate
 {
