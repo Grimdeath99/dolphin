@@ -32,6 +32,7 @@ public:
   CustomPipelineAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library,
                        std::vector<PipelinePassPassDescription> pass_descriptions);
   ~CustomPipelineAction();
+  void OnTextureLoad(GraphicsModActionData::TextureLoad*) override;
   void OnDrawStarted(GraphicsModActionData::DrawStarted*) override;
   void OnTextureCreate(GraphicsModActionData::TextureCreate*) override;
 
@@ -49,6 +50,7 @@ private:
   ShaderCode m_last_generated_shader_code;
 
   bool m_valid = true;
+  bool m_trigger_texture_reload = true;
 
   std::vector<std::string> m_texture_code_names;
 };

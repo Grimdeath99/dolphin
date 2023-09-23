@@ -259,6 +259,18 @@ CustomPipelineAction::CustomPipelineAction(
 
 CustomPipelineAction::~CustomPipelineAction() = default;
 
+void CustomPipelineAction::OnTextureLoad(GraphicsModActionData::TextureLoad* load)
+{
+  if (!load->force_texture_reload) [[unlikely]]
+    return;
+
+  if (m_trigger_texture_reload)
+  {
+    m_trigger_texture_reload = false;
+    *load->force_texture_reload = true;
+  }
+}
+
 void CustomPipelineAction::OnDrawStarted(GraphicsModActionData::DrawStarted* draw_started)
 {
   if (!draw_started) [[unlikely]]
