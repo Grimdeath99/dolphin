@@ -187,7 +187,7 @@ void WriteDefines(ShaderCode* out, const std::vector<std::string>& texture_code_
     out->Write(
         "#define {0}_COORD_{{0}} float3(data.texcoord[data.texmap_to_texcoord_index[{1}]].xy, "
         "{2})\n",
-        code_name, texture_unit, i + 1);
+        code_name, texture_unit, i);
   }
 }
 
@@ -377,7 +377,8 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
   const auto& pass_config = m_passes_config[0];
   auto& pass = m_passes[0];
 
-  if (!pass.m_pixel_material.m_asset)
+  if (!pass.m_pixel_material.m_asset ||
+      pass_config.m_pixel_material_asset != pass.m_pixel_material.m_asset->GetAssetId())
   {
     pass.m_pixel_material.m_asset =
         loader.LoadMaterial(pass_config.m_pixel_material_asset, m_library);
@@ -388,11 +389,16 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
 
   const auto material_data = pass.m_pixel_material.m_asset->GetData();
   if (!material_data)
+  {
+    m_valid = false;
     return;
+  }
 
   std::size_t max_material_data_size = 0;
-  if (!pass.m_pixel_shader.m_asset || pass.m_pixel_material.m_asset->GetLastLoadedTime() >
-                                          pass.m_pixel_material.m_cached_write_time)
+  if (!pass.m_pixel_shader.m_asset ||
+      pass.m_pixel_material.m_asset->GetLastLoadedTime() >
+          pass.m_pixel_material.m_cached_write_time ||
+      material_data->shader_asset != pass.m_pixel_shader.m_asset->GetAssetId())
   {
     m_last_generated_shader_code = ShaderCode{};
     m_last_generated_material_code = ShaderCode{};
