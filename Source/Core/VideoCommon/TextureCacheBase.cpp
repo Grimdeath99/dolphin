@@ -1694,6 +1694,9 @@ RcTcacheEntry TextureCacheBase::GetTexture(const int textureCacheSafetyColorSamp
 
   for (auto& cached_asset : cached_game_assets)
   {
+    if (!cached_asset.m_asset)
+      continue;
+
     auto data = cached_asset.m_asset->GetData();
     if (data)
     {
