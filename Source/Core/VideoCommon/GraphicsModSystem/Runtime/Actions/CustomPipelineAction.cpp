@@ -522,7 +522,8 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
       return;
     }
 
-    if (main_texture_data->m_slices.empty() || main_texture_data->m_slices[0].m_levels.empty())
+    if (main_texture_data->m_texture.m_slices.empty() ||
+        main_texture_data->m_texture.m_slices[0].m_levels.empty())
     {
       ERROR_LOG_FMT(VIDEO,
                     "Custom pipeline for texture '{}' has main texture '{}' that does not have any "
@@ -546,7 +547,7 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
         auto data = game_texture.m_asset->GetData();
         if (data)
         {
-          if (data->m_slices.empty() || data->m_slices[0].m_levels.empty())
+          if (data->m_texture.m_slices.empty() || data->m_texture.m_slices[0].m_levels.empty())
           {
             ERROR_LOG_FMT(VIDEO,
                           "Custom pipeline for texture '{}' has asset '{}' that does not have any "
@@ -561,19 +562,19 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
             m_valid = false;
             return;
           }
-          else if (main_texture_data->m_slices[0].m_levels[0].width !=
-                       data->m_slices[0].m_levels[0].width ||
-                   main_texture_data->m_slices[0].m_levels[0].height !=
-                       data->m_slices[0].m_levels[0].height)
+          else if (main_texture_data->m_texture.m_slices[0].m_levels[0].width !=
+                       data->m_texture.m_slices[0].m_levels[0].width ||
+                   main_texture_data->m_texture.m_slices[0].m_levels[0].height !=
+                       data->m_texture.m_slices[0].m_levels[0].height)
           {
             ERROR_LOG_FMT(VIDEO,
                           "Custom pipeline for texture '{}' has asset '{}' that does not match "
                           "the width/height of the main texture.  Texture {}x{} vs asset {}x{}",
                           create->texture_name, game_texture.m_asset->GetAssetId(),
-                          main_texture_data->m_slices[0].m_levels[0].width,
-                          main_texture_data->m_slices[0].m_levels[0].height,
-                          data->m_slices[0].m_levels[0].width,
-                          data->m_slices[0].m_levels[0].height);
+                          main_texture_data->m_texture.m_slices[0].m_levels[0].width,
+                          main_texture_data->m_texture.m_slices[0].m_levels[0].height,
+                          data->m_texture.m_slices[0].m_levels[0].width,
+                          data->m_texture.m_slices[0].m_levels[0].height);
             create->additional_dependencies->push_back(
                 VideoCommon::CachedAsset<VideoCommon::CustomAsset>{
                     main_texture_asset.m_asset, main_texture_asset.m_cached_write_time});
