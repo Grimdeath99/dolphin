@@ -9,6 +9,7 @@
 
 #include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
+#include "Common/VariantUtil.h"
 #include "VideoCommon/Assets/CustomAssetLibrary.h"
 #include "VideoCommon/ShaderGenCommon.h"
 
@@ -229,6 +230,17 @@ bool ParseMaterialProperties(const CustomAssetLibrary::AssetID& asset_id,
 
   return true;
 }
+
+template <typename T, std::size_t N>
+picojson::array ArrayToPicoArray(const std::array<T, N>& value)
+{
+  picojson::array result;
+  for (std::size_t i = 0; i < N; i++)
+  {
+    result.push_back(picojson::value{static_cast<double>(value[i])});
+  }
+  return result;
+}
 }  // namespace
 
 void MaterialProperty::WriteToMemory(u8*& buffer, const MaterialProperty& property)
@@ -422,6 +434,95 @@ bool MaterialData::FromJson(const CustomAssetLibrary::AssetID& asset_id,
   data->shader_asset = shader_asset_iter->second.to_str();
 
   return true;
+}
+
+void MaterialData::ToJson(picojson::object* obj, const MaterialData& data)
+{
+  if (!obj) [[unlikely]]
+    return;
+
+  auto& json_obj = *obj;
+
+  picojson::array json_properties;
+  for (const auto& property : data.properties)
+  {
+    picojson::object json_property;
+    json_property["code_name"] = picojson::value{property.m_code_name};
+
+    switch (property.m_type)
+    {
+    case MaterialProperty::Type::Type_TextureAsset:
+      json_property["type"] = picojson::value{"texture_asset"};
+      break;
+    case MaterialProperty::Type::Type_Int:
+      json_property["type"] = picojson::value{"int"};
+      break;
+    case MaterialProperty::Type::Type_Int2:
+      json_property["type"] = picojson::value{"int2"};
+      break;
+    case MaterialProperty::Type::Type_Int3:
+      json_property["type"] = picojson::value{"int3"};
+      break;
+    case MaterialProperty::Type::Type_Int4:
+      json_property["type"] = picojson::value{"int4"};
+      break;
+    case MaterialProperty::Type::Type_Float:
+      json_property["type"] = picojson::value{"float"};
+      break;
+    case MaterialProperty::Type::Type_Float2:
+      json_property["type"] = picojson::value{"float2"};
+      break;
+    case MaterialProperty::Type::Type_Float3:
+      json_property["type"] = picojson::value{"float3"};
+      break;
+    case MaterialProperty::Type::Type_Float4:
+      json_property["type"] = picojson::value{"float4"};
+      break;
+    case MaterialProperty::Type::Type_Bool:
+      json_property["type"] = picojson::value{"bool"};
+      break;
+    case MaterialProperty::Type::Type_Undefined:
+      break;
+    };
+
+    if (property.m_value)
+    {
+      std::visit(overloaded{[&](const CustomAssetLibrary::AssetID& value) {
+                              json_property["value"] = picojson::value{value};
+                            },
+                            [&](s32 value) {
+                              json_property["value"] = picojson::value{static_cast<double>(value)};
+                            },
+                            [&](const std::array<s32, 2>& value) {
+                              json_property["value"] = picojson::value{ArrayToPicoArray(value)};
+                            },
+                            [&](const std::array<s32, 3>& value) {
+                              json_property["value"] = picojson::value{ArrayToPicoArray(value)};
+                            },
+                            [&](const std::array<s32, 4>& value) {
+                              json_property["value"] = picojson::value{ArrayToPicoArray(value)};
+                            },
+                            [&](float value) {
+                              json_property["value"] = picojson::value{static_cast<double>(value)};
+                            },
+                            [&](const std::array<float, 2>& value) {
+                              json_property["value"] = picojson::value{ArrayToPicoArray(value)};
+                            },
+                            [&](const std::array<float, 3>& value) {
+                              json_property["value"] = picojson::value{ArrayToPicoArray(value)};
+                            },
+                            [&](const std::array<float, 4>& value) {
+                              json_property["value"] = picojson::value{ArrayToPicoArray(value)};
+                            },
+                            [&](bool value) { json_property["value"] = picojson::value{value}; }},
+                 *property.m_value);
+    }
+
+    json_properties.push_back(picojson::value{json_property});
+  }
+
+  json_obj["values"] = picojson::value{json_properties};
+  json_obj["shader_asset"] = picojson::value{data.shader_asset};
 }
 
 CustomAssetLibrary::LoadInfo MaterialAsset::LoadImpl(const CustomAssetLibrary::AssetID& asset_id)
