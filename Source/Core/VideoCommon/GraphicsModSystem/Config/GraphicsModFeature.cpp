@@ -5,6 +5,17 @@
 
 #include "Common/Logging/Log.h"
 
+void GraphicsModFeatureConfig::SerializeToConfig(picojson::object* obj) const
+{
+  if (!obj) [[unlikely]]
+    return;
+
+  auto& json_obj = *obj;
+  json_obj["group"] = picojson::value{m_group};
+  json_obj["action"] = picojson::value{m_action};
+  json_obj["action_data"] = m_action_data;
+}
+
 bool GraphicsModFeatureConfig::DeserializeFromConfig(const picojson::object& obj)
 {
   if (auto group_iter = obj.find("group"); group_iter != obj.end())

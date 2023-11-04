@@ -38,6 +38,7 @@ struct GraphicsModConfig
 
   std::string GetAbsolutePath() const;
 
+  void SerializeToConfig(picojson::object* obj) const;
   bool DeserializeFromConfig(const picojson::value& value);
 
   void SerializeToProfile(picojson::object* value) const;
