@@ -158,6 +158,76 @@ bool PixelShaderData::FromJson(const VideoCommon::CustomAssetLibrary::AssetID& a
 
   return true;
 }
+
+void PixelShaderData::ToJson(picojson::object* obj, const PixelShaderData& data)
+{
+  if (!obj) [[unlikely]]
+    return;
+
+  auto& json_obj = *obj;
+
+  picojson::array json_properties;
+  for (const auto& [name, property] : data.m_properties)
+  {
+    picojson::object json_property;
+    json_property["code_name"] = picojson::value{name};
+    json_property["description"] = picojson::value{property.m_description};
+
+    switch (property.m_type)
+    {
+    case ShaderProperty::Type::Type_Sampler2D:
+      json_property["type"] = picojson::value{"sampler2d"};
+      break;
+    case ShaderProperty::Type::Type_SamplerCube:
+      json_property["type"] = picojson::value{"samplercube"};
+      break;
+    case ShaderProperty::Type::Type_SamplerArrayShared_Main:
+      json_property["type"] = picojson::value{"samplerarrayshared_main"};
+      break;
+    case ShaderProperty::Type::Type_SamplerArrayShared_Additional:
+      json_property["type"] = picojson::value{"samplerarrayshared_additional"};
+      break;
+    case ShaderProperty::Type::Type_Int:
+      json_property["type"] = picojson::value{"int"};
+      break;
+    case ShaderProperty::Type::Type_Int2:
+      json_property["type"] = picojson::value{"int2"};
+      break;
+    case ShaderProperty::Type::Type_Int3:
+      json_property["type"] = picojson::value{"int3"};
+      break;
+    case ShaderProperty::Type::Type_Int4:
+      json_property["type"] = picojson::value{"int4"};
+      break;
+    case ShaderProperty::Type::Type_Float:
+      json_property["type"] = picojson::value{"float"};
+      break;
+    case ShaderProperty::Type::Type_Float2:
+      json_property["type"] = picojson::value{"float2"};
+      break;
+    case ShaderProperty::Type::Type_Float3:
+      json_property["type"] = picojson::value{"float3"};
+      break;
+    case ShaderProperty::Type::Type_Float4:
+      json_property["type"] = picojson::value{"float4"};
+      break;
+    case ShaderProperty::Type::Type_RGB:
+      json_property["type"] = picojson::value{"rgb"};
+      break;
+    case ShaderProperty::Type::Type_RGBA:
+      json_property["type"] = picojson::value{"rgba"};
+      break;
+    case ShaderProperty::Type::Type_Bool:
+      json_property["type"] = picojson::value{"bool"};
+      break;
+    case ShaderProperty::Type::Type_Undefined:
+      break;
+    };
+    json_properties.push_back(picojson::value{json_property});
+  }
+  json_obj["properties"] = picojson::value{json_properties};
+}
+
 CustomAssetLibrary::LoadInfo PixelShaderAsset::LoadImpl(const CustomAssetLibrary::AssetID& asset_id)
 {
   auto potential_data = std::make_shared<PixelShaderData>();
