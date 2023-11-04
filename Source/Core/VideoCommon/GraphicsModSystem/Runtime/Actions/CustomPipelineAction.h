@@ -40,6 +40,8 @@ public:
   void OnTextureCreate(GraphicsModActionData::TextureCreate*) override;
 
   void DrawImGui() override;
+  void SerializeToConfig(picojson::object* obj) override;
+  std::string GetFactoryName() const override;
 
 private:
   std::shared_ptr<VideoCommon::CustomAssetLibrary> m_library;
@@ -49,6 +51,7 @@ private:
     VideoCommon::CachedAsset<VideoCommon::MaterialAsset> m_pixel_material;
     VideoCommon::CachedAsset<VideoCommon::PixelShaderAsset> m_pixel_shader;
     std::vector<VideoCommon::CachedAsset<VideoCommon::GameTextureAsset>> m_game_textures;
+    std::vector<VideoCommon::CachedAsset<VideoCommon::GameTextureAsset>> m_additional_textures;
   };
   std::vector<PipelinePass> m_passes;
 

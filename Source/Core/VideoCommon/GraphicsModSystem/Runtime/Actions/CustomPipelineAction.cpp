@@ -19,6 +19,7 @@
 #include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/Assets/CustomAssetLoader.h"
 #include "VideoCommon/Assets/DirectFilesystemAssetLibrary.h"
+#include "VideoCommon/GraphicsModEditor/EditorEvents.h"
 #include "VideoCommon/ShaderGenCommon.h"
 #include "VideoCommon/TextureCacheBase.h"
 
@@ -383,7 +384,6 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
   {
     pass.m_pixel_material.m_asset =
         loader.LoadMaterial(pass_config.m_pixel_material_asset, m_library);
-    pass.m_pixel_material.m_cached_write_time = pass.m_pixel_material.m_asset->GetLastLoadedTime();
   }
   create->additional_dependencies->push_back(VideoCommon::CachedAsset<VideoCommon::CustomAsset>{
       pass.m_pixel_material.m_asset, pass.m_pixel_material.m_asset->GetLastLoadedTime()});
@@ -405,6 +405,7 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
     m_last_generated_material_code = ShaderCode{};
     pass.m_pixel_shader.m_asset = loader.LoadPixelShader(material_data->shader_asset, m_library);
     pass.m_pixel_shader.m_cached_write_time = pass.m_pixel_shader.m_asset->GetLastLoadedTime();
+    pass.m_pixel_material.m_cached_write_time = pass.m_pixel_material.m_asset->GetLastLoadedTime();
     for (const auto& property : material_data->properties)
     {
       max_material_data_size += VideoCommon::MaterialProperty::GetMemorySize(property);
@@ -417,6 +418,12 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
 
   const auto shader_data = pass.m_pixel_shader.m_asset->GetData();
   if (!shader_data)
+  {
+    m_valid = false;
+    return;
+  }
+
+  if (shader_data->m_properties.size() != material_data->properties.size())
   {
     m_valid = false;
     return;
@@ -513,6 +520,9 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
   if (main_texture_offset)
   {
     auto& main_texture_asset = pass.m_game_textures[*main_texture_offset];
+    if (!main_texture_asset.m_asset)
+      return;
+
     const auto main_texture_data = main_texture_asset.m_asset->GetData();
     if (!main_texture_data)
     {
@@ -643,6 +653,7 @@ void CustomPipelineAction::DrawImGui()
                 static_cast<const char*>(payload->Data), payload->DataSize);
             m_passes_config[0].m_pixel_material_asset = std::move(asset_id);
             m_trigger_texture_reload = true;
+            GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
           }
           ImGui::EndDragDropTarget();
         }
@@ -666,4 +677,27 @@ void CustomPipelineAction::DrawImGui()
       ImGui::EndDisabled();
     }
   }
+}
+
+void CustomPipelineAction::SerializeToConfig(picojson::object* obj)
+{
+  if (!obj) [[unlikely]]
+    return;
+
+  auto& json_obj = *obj;
+
+  picojson::array serialized_passes;
+  for (const auto& pass : m_passes_config)
+  {
+    picojson::object serialized_pass;
+    serialized_pass["pixel_material_asset"] = picojson::value{pass.m_pixel_material_asset};
+    serialized_passes.push_back(picojson::value{serialized_pass});
+
+  }
+  json_obj["passes"] = picojson::value{serialized_passes};
+}
+
+std::string CustomPipelineAction::GetFactoryName() const
+{
+  return "custom_pipeline";
 }
