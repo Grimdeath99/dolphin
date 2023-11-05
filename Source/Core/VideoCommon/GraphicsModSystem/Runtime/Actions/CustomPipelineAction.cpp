@@ -19,7 +19,9 @@
 #include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/Assets/CustomAssetLoader.h"
 #include "VideoCommon/Assets/DirectFilesystemAssetLibrary.h"
+#include "VideoCommon/GraphicsModEditor/Controls/AssetDisplay.h"
 #include "VideoCommon/GraphicsModEditor/EditorEvents.h"
+#include "VideoCommon/GraphicsModEditor/EditorMain.h"
 #include "VideoCommon/ShaderGenCommon.h"
 #include "VideoCommon/TextureCacheBase.h"
 
@@ -451,35 +453,36 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
 
     // TODO: Compare shader and material type
 
-    if (property.m_value)
+    if (property.m_type == VideoCommon::MaterialProperty::Type::Type_TextureAsset)
     {
-      if (property.m_type == VideoCommon::MaterialProperty::Type::Type_TextureAsset)
+      if (shader_it->second.m_type ==
+          VideoCommon::ShaderProperty::Type::Type_SamplerArrayShared_Main)
       {
-        if (shader_it->second.m_type ==
-            VideoCommon::ShaderProperty::Type::Type_SamplerArrayShared_Main)
-        {
-          main_texture_offset = index;
-        }
-        else if (shader_it->second.m_type ==
-                 VideoCommon::ShaderProperty::Type::Type_SamplerArrayShared_Additional)
-        {
-          has_shared_texture = true;
-        }
-        else if (shader_it->second.m_type == VideoCommon::ShaderProperty::Type::Type_Sampler2D)
-        {
-          // nop for now
-        }
-        else
-        {
-          ERROR_LOG_FMT(
-              VIDEO,
-              "Custom pipeline for texture '{}', material asset '{}' has property texture "
-              "for shader property '{}' that does not support textures!",
-              create->texture_name, pass.m_pixel_material.m_asset->GetAssetId(),
-              property.m_code_name);
-          m_valid = false;
-          return;
-        }
+        main_texture_offset = index;
+      }
+      else if (shader_it->second.m_type ==
+               VideoCommon::ShaderProperty::Type::Type_SamplerArrayShared_Additional)
+      {
+        has_shared_texture = true;
+      }
+      else if (shader_it->second.m_type == VideoCommon::ShaderProperty::Type::Type_Sampler2D)
+      {
+        // nop for now
+        continue;
+      }
+      else
+      {
+        ERROR_LOG_FMT(VIDEO,
+                      "Custom pipeline for texture '{}', material asset '{}' has property texture "
+                      "for shader property '{}' that does not support textures!",
+                      create->texture_name, pass.m_pixel_material.m_asset->GetAssetId(),
+                      property.m_code_name);
+        m_valid = false;
+        return;
+      }
+
+      if (property.m_value)
+      {
         if (auto* value = std::get_if<VideoCommon::CustomAssetLibrary::AssetID>(&*property.m_value))
         {
           if (*value == "")
@@ -497,6 +500,13 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
         }
       }
       else
+      {
+        game_assets.push_back(VideoCommon::CachedAsset<VideoCommon::GameTextureAsset>{});
+      }
+    }
+    else
+    {
+      if (property.m_value)
       {
         VideoCommon::MaterialProperty::WriteToMemory(material_buffer, property);
       }
@@ -633,6 +643,7 @@ void CustomPipelineAction::OnTextureCreate(GraphicsModActionData::TextureCreate*
 
 void CustomPipelineAction::DrawImGui()
 {
+  auto& editor = Core::System::GetInstance().GetGraphicsModEditor();
   if (ImGui::CollapsingHeader("Custom pipeline", ImGuiTreeNodeFlags_DefaultOpen))
   {
     if (m_passes_config.size() == 1)
@@ -643,19 +654,12 @@ void CustomPipelineAction::DrawImGui()
         ImGui::TableNextColumn();
         ImGui::Text("Material");
         ImGui::TableNextColumn();
-        ImGui::InputText("##CustomPipelineMaterialAsset",
-                         &m_passes_config[0].m_pixel_material_asset);
-        if (ImGui::BeginDragDropTarget())
+        if (GraphicsModEditor::Controls::AssetDisplay(
+                "CustomPipelineActionMaterial", editor.GetEditorState(),
+                &m_passes_config[0].m_pixel_material_asset, GraphicsModEditor::Material))
         {
-          if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload("MaterialAsset"))
-          {
-            VideoCommon::CustomAssetLibrary::AssetID asset_id(
-                static_cast<const char*>(payload->Data), payload->DataSize);
-            m_passes_config[0].m_pixel_material_asset = std::move(asset_id);
-            m_trigger_texture_reload = true;
-            GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-          }
-          ImGui::EndDragDropTarget();
+          m_trigger_texture_reload = true;
+          GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
         }
         ImGui::EndTable();
       }
@@ -692,7 +696,6 @@ void CustomPipelineAction::SerializeToConfig(picojson::object* obj)
     picojson::object serialized_pass;
     serialized_pass["pixel_material_asset"] = picojson::value{pass.m_pixel_material_asset};
     serialized_passes.push_back(picojson::value{serialized_pass});
-
   }
   json_obj["passes"] = picojson::value{serialized_passes};
 }
