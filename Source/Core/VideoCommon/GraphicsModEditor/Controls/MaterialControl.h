@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "VideoCommon/Assets/CustomAsset.h"
 #include "VideoCommon/GraphicsModEditor/EditorState.h"
 
 namespace VideoCommon

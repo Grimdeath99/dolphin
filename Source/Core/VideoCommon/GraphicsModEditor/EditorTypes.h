@@ -32,7 +32,10 @@ struct DrawCallID
   // the ID will be composed of other data as well (position, mesh details, etc?)
   std::string GetID() const { return m_texture_hash; }
   std::string m_texture_hash;
-  auto operator<=>(const DrawCallID&) const = default;
+
+  // Explicitly provide comparison category because some compilers
+  // haven't written string operator<=>
+  std::strong_ordering operator<=>(const DrawCallID&) const = default;
 };
 
 struct DrawCallData

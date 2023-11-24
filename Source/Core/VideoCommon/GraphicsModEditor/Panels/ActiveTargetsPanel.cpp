@@ -196,7 +196,7 @@ void ActiveTargetsPanel::DrawCallPanel()
       name = id;
     else
       name = user_data.m_friendly_name;
-    const bool node_open = ImGui::TreeNodeEx(id.c_str(), node_flags, name.data());
+    const bool node_open = ImGui::TreeNodeEx(id.c_str(), node_flags, "%s", name.data());
 
     bool ignore_target_context_menu = false;
     if (ImGui::IsItemClicked(ImGuiMouseButton_::ImGuiMouseButton_Left) || ImGui::IsItemFocused())
@@ -223,7 +223,7 @@ void ActiveTargetsPanel::DrawCallPanel()
 
           if (m_selected_nodes.contains(action.get()))
             node_flags |= ImGuiTreeNodeFlags_Selected;
-          ImGui::TreeNodeEx(action->GetID().c_str(), node_flags, action->GetName().c_str());
+          ImGui::TreeNodeEx(action->GetID().c_str(), node_flags, "%s", action->GetName().c_str());
           if (ImGui::IsItemClicked(ImGuiMouseButton_::ImGuiMouseButton_Left) ||
               ImGui::IsItemFocused())
           {
@@ -411,7 +411,7 @@ void ActiveTargetsPanel::EFBPanel()
       name = id;
     else
       name = user_data.m_friendly_name;
-    const bool node_open = ImGui::TreeNodeEx(id.c_str(), node_flags, name.data());
+    const bool node_open = ImGui::TreeNodeEx(id.c_str(), node_flags, "%s", name.data());
 
     bool ignore_target_context_menu = false;
     if (ImGui::IsItemClicked(ImGuiMouseButton_::ImGuiMouseButton_Left) || ImGui::IsItemFocused())
@@ -438,7 +438,7 @@ void ActiveTargetsPanel::EFBPanel()
 
           if (m_selected_nodes.contains(action.get()))
             node_flags |= ImGuiTreeNodeFlags_Selected;
-          ImGui::TreeNodeEx(action->GetID().c_str(), node_flags, action->GetName().c_str());
+          ImGui::TreeNodeEx(action->GetID().c_str(), node_flags, "%s", action->GetName().c_str());
           if (ImGui::IsItemClicked(ImGuiMouseButton_::ImGuiMouseButton_Left) ||
               ImGui::IsItemFocused())
           {
@@ -527,16 +527,16 @@ void ActiveTargetsPanel::EndOfFrame()
   {
     m_state.m_runtime_data.m_draw_call_id_to_data = std::move(m_upcoming_draw_call_id_to_data);
     m_current_draw_calls = std::move(m_upcoming_draw_calls);
-    std::ranges::sort(m_current_draw_calls,
-                      [](DrawCallData* f1, DrawCallData* f2) { return f1->m_time < f2->m_time; });
+    std::sort(m_current_draw_calls.begin(), m_current_draw_calls.end(),
+              [](DrawCallData* f1, DrawCallData* f2) { return f1->m_time < f2->m_time; });
   }
 
   if (!m_upcoming_fb_call_id_to_data.empty())
   {
     m_state.m_runtime_data.m_fb_call_id_to_data = std::move(m_upcoming_fb_call_id_to_data);
     m_current_fb_calls = std::move(m_upcoming_fb_calls);
-    std::ranges::sort(m_current_fb_calls,
-                      [](FBCallData* f1, FBCallData* f2) { return f1->m_time < f2->m_time; });
+    std::sort(m_current_fb_calls.begin(), m_current_fb_calls.end(),
+              [](FBCallData* f1, FBCallData* f2) { return f1->m_time < f2->m_time; });
   }
 }
 

@@ -184,7 +184,7 @@ void MaterialControl::DrawImGui(VideoCommon::MaterialData* material,
     if (!shader)
     {
       ImGui::Text(
-          fmt::format("Asset id '{}' was not type shader!", material->shader_asset).c_str());
+          "%s", fmt::format("Asset id '{}' was not type shader!", material->shader_asset).c_str());
     }
     else
     {
@@ -192,9 +192,9 @@ void MaterialControl::DrawImGui(VideoCommon::MaterialData* material,
       if (std::any_of(shader_data->m_properties.begin(), shader_data->m_properties.end(),
                       [](const auto& pair) { return pair.first == ""; }))
       {
-        ImGui::Text(fmt::format("The shader '{}' has invalid or incomplete properties!",
-                                material->shader_asset)
-                        .c_str());
+        ImGui::Text("%s", fmt::format("The shader '{}' has invalid or incomplete properties!",
+                                      material->shader_asset)
+                              .c_str());
       }
       else
       {
@@ -218,7 +218,7 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
       {
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
-        ImGui::Text(name.c_str());
+        ImGui::Text("%s", name.c_str());
         ImGui::TableNextColumn();
 
         auto& material_property = material->properties[property_index];

@@ -3,6 +3,7 @@
 
 #include "VideoCommon/GraphicsModEditor/Controls/ShaderControl.h"
 
+#include <chrono>
 #include <map>
 #include <string>
 
@@ -11,6 +12,7 @@
 #include <misc/cpp/imgui_stdlib.h>
 
 #include "VideoCommon/Assets/ShaderAsset.h"
+#include "VideoCommon/GraphicsModEditor/EditorEvents.h"
 
 namespace GraphicsModEditor::Controls
 {
@@ -18,7 +20,8 @@ ShaderControl::ShaderControl(EditorState& state) : m_state(state)
 {
 }
 
-void ShaderControl::DrawImGui(VideoCommon::PixelShaderData* shader)
+void ShaderControl::DrawImGui(VideoCommon::PixelShaderData* shader,
+                              VideoCommon::CustomAssetLibrary::TimeType* last_data_write)
 {
   if (ImGui::BeginTable("ShaderForm", 2))
   {
@@ -52,8 +55,8 @@ void ShaderControl::DrawImGui(VideoCommon::PixelShaderData* shader)
                             fmt::to_string(property.m_type).c_str()))
       {
         for (auto e = VideoCommon::ShaderProperty::Type::Type_Undefined;
-             e < VideoCommon::ShaderProperty::Type::Type_Max;
-             static_cast<VideoCommon::ShaderProperty::Type>(static_cast<u32>(e) + 1))
+             e <= VideoCommon::ShaderProperty::Type::Type_Max;
+             e = static_cast<VideoCommon::ShaderProperty::Type>(static_cast<u32>(e) + 1))
         {
           if (e == VideoCommon::ShaderProperty::Type::Type_Undefined)
           {
@@ -64,6 +67,8 @@ void ShaderControl::DrawImGui(VideoCommon::PixelShaderData* shader)
           if (ImGui::Selectable(fmt::to_string(e).c_str(), is_selected))
           {
             property.m_type = e;
+            *last_data_write = std::chrono::system_clock::now();
+            GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
           }
         }
         ImGui::EndCombo();
@@ -85,6 +90,8 @@ void ShaderControl::DrawImGui(VideoCommon::PixelShaderData* shader)
     {
       shader->m_properties.try_emplace(fmt::format("Prop{}", shader->m_properties.size()),
                                        VideoCommon::ShaderProperty{});
+      *last_data_write = std::chrono::system_clock::now();
+      GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
     }
   }
 }

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "VideoCommon/Assets/CustomAsset.h"
 #include "VideoCommon/GraphicsModEditor/EditorState.h"
 
 namespace VideoCommon
@@ -16,7 +17,8 @@ class ShaderControl
 {
 public:
   explicit ShaderControl(EditorState& state);
-  void DrawImGui(VideoCommon::PixelShaderData* shader);
+  void DrawImGui(VideoCommon::PixelShaderData* shader,
+                 VideoCommon::CustomAssetLibrary::TimeType* last_data_write);
 
 private:
   EditorState& m_state;

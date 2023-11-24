@@ -101,11 +101,9 @@ void PropertiesPanel::DrawCallIDSelected(const DrawCallID& selected_object)
       float image_height = data.m_texture->GetHeight();
       const float image_aspect_ratio = image_width / image_height;
 
-      if (column_width < data.m_texture->GetWidth())
-      {
-        image_width = column_width;
-        image_height = column_width / image_aspect_ratio;
-      }
+      image_width = column_width;
+      image_height = column_width * image_aspect_ratio;
+
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
       ImGui::Text("Texture");
@@ -150,11 +148,9 @@ void PropertiesPanel::FBCallIDSelected(const FBInfo& selected_object)
       float image_height = data.m_texture->GetHeight();
       const float image_aspect_ratio = image_width / image_height;
 
-      if (column_width < data.m_texture->GetWidth())
-      {
-        image_width = column_width;
-        image_height = column_width / image_aspect_ratio;
-      }
+      image_width = column_width;
+      image_height = column_width * image_aspect_ratio;
+
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
       ImGui::Text("Texture");
@@ -174,10 +170,14 @@ void PropertiesPanel::AssetDataSelected(EditorAsset* selected_object)
                                                 &selected_object->m_last_data_write);
                  },
                  [&](const std::unique_ptr<VideoCommon::PixelShaderData>& pixel_shader_data) {
-                   m_shader_control.DrawImGui(pixel_shader_data.get());
+                   m_shader_control.DrawImGui(pixel_shader_data.get(),
+                                              &selected_object->m_last_data_write);
                  },
                  [&](const std::unique_ptr<VideoCommon::TextureData>& texture_data) {
-                   ImGui::Text("Texture asset selected");
+                   auto asset_preview = m_state.m_user_data.m_asset_library->GetAssetPreview(
+                       selected_object->m_asset_id);
+                   m_texture_control.DrawImGui(texture_data.get(), selected_object->m_asset_path,
+                                               &selected_object->m_last_data_write, asset_preview);
                  }},
       selected_object->m_data);
 }

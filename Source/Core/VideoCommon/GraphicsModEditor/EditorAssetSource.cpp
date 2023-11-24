@@ -468,8 +468,11 @@ void EditorAssetSource::SaveAssetDataAsFiles() const
     json_stream << output;
   };
   std::lock_guard lk(m_asset_lock);
-  for (const auto& [path, asset] : m_path_to_editor_asset)
+  for (const auto& pair : m_path_to_editor_asset)
   {
+    // Workaround for some compilers not being able
+    // to capture structured bindings in lambda
+    const auto& asset = pair.second;
     std::visit(
         overloaded{[&](const std::unique_ptr<VideoCommon::MaterialData>& material_data) {
                      if (const auto metadata_it = asset.m_asset_map.find("metadata");
