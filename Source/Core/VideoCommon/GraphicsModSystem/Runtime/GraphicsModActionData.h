@@ -12,6 +12,7 @@
 #include "Common/CommonTypes.h"
 #include "Common/Matrix.h"
 #include "VideoCommon/Assets/TextureAsset.h"
+#include "VideoCommon/ConstantManager.h"
 #include "VideoCommon/PixelShaderGen.h"
 
 namespace GraphicsModActionData
@@ -31,6 +32,16 @@ struct EFB
   bool* skip;
   u32* scaled_width;
   u32* scaled_height;
+};
+
+struct Light
+{
+  int4* color;
+  float4* cosatt;
+  float4* distatt;
+  float4* pos;
+  float4* dir;
+  bool* skip;
 };
 
 struct Projection
