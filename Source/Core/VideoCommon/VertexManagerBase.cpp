@@ -12,6 +12,7 @@
 #include "Common/EnumMap.h"
 #include "Common/Logging/Log.h"
 #include "Common/MathUtil.h"
+#include "Common/SmallVector.h"
 
 #include "Core/ConfigManager.h"
 #include "Core/DolphinAnalytics.h"
@@ -115,7 +116,11 @@ VertexManagerBase::VertexManagerBase()
 {
 }
 
-VertexManagerBase::~VertexManagerBase() = default;
+VertexManagerBase::~VertexManagerBase()
+{
+  XXH3_freeState(m_graphics_mod_id_hash_state);
+  XXH3_freeState(m_graphics_mod_light_hash_state);
+}
 
 bool VertexManagerBase::Initialize()
 {
@@ -125,6 +130,8 @@ bool VertexManagerBase::Initialize()
   m_index_generator.Init();
   m_custom_shader_cache = std::make_unique<CustomShaderCache>();
   m_cpu_cull.Init();
+  m_graphics_mod_id_hash_state = XXH3_createState();
+  m_graphics_mod_light_hash_state = XXH3_createState();
   return true;
 }
 
@@ -546,54 +553,206 @@ void VertexManagerBase::Flush()
   auto& xf_state_manager = system.GetXFStateManager();
   auto& editor = system.GetGraphicsModEditor();
 
+  const auto used_textures = UsedTextures();
+  GraphicsModEditor::DrawCallData data;
+
+  if (g_ActiveConfig.bGraphicMods)
+  {
+    XXH3_64bits_reset_withSeed(m_graphics_mod_id_hash_state, m_graphics_mod_hash_seed);
+  }
+
+  CalculateBinormals(VertexLoaderManager::GetCurrentVertexFormat());
+  // Calculate ZSlope for zfreeze
+  std::vector<std::string> texture_names;
+  Common::SmallVector<u32, 8> texture_units;
+  if (!m_cull_all)
+  {
+    for (const u32 i : used_textures)
+    {
+      const auto cache_entry = g_texture_cache->Load(TextureInfo::FromStage(i));
+
+      if (g_ActiveConfig.bGraphicMods)
+      {
+        if (editor.IsEnabled())
+        {
+          GraphicsModEditor::DrawCallData::TextureDetails texture_details;
+          texture_details.m_texture = cache_entry->texture.get();
+          texture_details.m_hash = cache_entry->texture_info_name;
+          texture_details.m_texture_unit = i;
+          data.m_textures_details.push_back(std::move(texture_details));
+        }
+        texture_units.push_back(i);
+
+        XXH3_64bits_update(m_graphics_mod_id_hash_state, cache_entry->texture_info_name.data(),
+                           cache_entry->texture_info_name.size());
+      }
+    }
+  }
+
+  GraphicsMods::DrawCallID draw_call_id = GraphicsMods::DrawCallID::INVALID;
   if (g_ActiveConfig.bGraphicMods)
   {
     const double seconds_elapsed =
         static_cast<double>(m_ticks_elapsed) / system.GetSystemTimers().GetTicksPerSecond();
     pixel_shader_manager.constants.time_ms = seconds_elapsed * 1000;
+
+    XXH3_64bits_update(m_graphics_mod_id_hash_state, &xfmem.projection.type,
+                       sizeof(ProjectionType));
+    XXH3_64bits_update(m_graphics_mod_id_hash_state, &bpmem.blendmode, sizeof(BlendMode));
+    // XXH3_64bits_update(m_graphics_mod_id_hash_state, &xfmem.viewport, sizeof(Viewport));
+
+    // if (!IsDrawSkinned(VertexLoaderManager::GetCurrentVertexFormat()))
+    {
+      // const auto world_pos =
+      //     GetLastWorldspacePosition(VertexLoaderManager::GetCurrentVertexFormat());
+      // XXH3_64bits_update(m_graphics_mod_id_hash_state, &world_pos, sizeof(world_pos));
+    }
+
+    /*if (!IsDrawSkinned(VertexLoaderManager::GetCurrentVertexFormat()))
+    {
+      XXH3_64bits_update(m_graphics_mod_id_hash_state, m_index_generator.GetIndexDataStart(),
+                         sizeof(u16) * m_index_generator.GetIndexLen());
+      const u32 vertex_count = m_index_generator.GetNumVerts();
+      XXH3_64bits_update(m_graphics_mod_id_hash_state, &vertex_count, sizeof(u32));
+    }*/
+
+    draw_call_id = GraphicsMods::DrawCallID(XXH3_64bits_digest(m_graphics_mod_id_hash_state));
+    if (editor.IsEnabled())
+    {
+      data.m_id = draw_call_id;
+      data.m_projection_type = xfmem.projection.type;
+      data.m_create_time = std::chrono::steady_clock::now();
+      data.m_last_update_time = data.m_create_time;
+
+      data.m_world_position =
+          GetLastWorldspacePosition(VertexLoaderManager::GetCurrentVertexFormat());
+
+      // Blending
+      data.m_blendenable = bpmem.blendmode.blendenable;
+      data.m_logicopenable = bpmem.blendmode.logicopenable;
+      data.m_dither = bpmem.blendmode.dither;
+      data.m_colorupdate = bpmem.blendmode.colorupdate;
+      data.m_alphaupdate = bpmem.blendmode.alphaupdate;
+      data.m_dstfactor = bpmem.blendmode.dstfactor;
+      data.m_srcfactor = bpmem.blendmode.srcfactor;
+      data.m_subtract = bpmem.blendmode.subtract;
+      data.m_logicmode = bpmem.blendmode.logicmode;
+
+      editor.AddDrawCall(std::move(data));
+    }
   }
 
-  CalculateBinormals(VertexLoaderManager::GetCurrentVertexFormat());
-  // Calculate ZSlope for zfreeze
-  const auto used_textures = UsedTextures();
-  std::vector<std::string> texture_names;
-  std::vector<u32> texture_units;
-  if (!m_cull_all)
+  Common::SmallVector<std::pair<GraphicsMods::LightID, int>, 8> lights_this_draw;
+  if (g_ActiveConfig.bGraphicMods)
   {
-    if (!g_ActiveConfig.bGraphicMods)
+    // Add any lights
+    const auto& lights_changed = xf_state_manager.GetLightsChanged();
+    if (lights_changed[0] >= 0)
     {
-      for (const u32 i : used_textures)
+      const int istart = lights_changed[0] / 0x10;
+      const int iend = (lights_changed[1] + 15) / 0x10;
+
+      for (int i = istart; i < iend; ++i)
       {
-        g_texture_cache->Load(TextureInfo::FromStage(i));
-      }
-    }
-    else
-    {
-      for (const u32 i : used_textures)
-      {
-        const auto cache_entry = g_texture_cache->Load(TextureInfo::FromStage(i));
-        if (cache_entry)
+        const Light& light = xfmem.lights[i];
+
+        VertexShaderConstants::Light dstlight;
+
+        // xfmem.light.color is packed as abgr in u8[4], so we have to swap the order
+        dstlight.color[0] = light.color[3];
+        dstlight.color[1] = light.color[2];
+        dstlight.color[2] = light.color[1];
+        dstlight.color[3] = light.color[0];
+
+        dstlight.cosatt[0] = light.cosatt[0];
+        dstlight.cosatt[1] = light.cosatt[1];
+        dstlight.cosatt[2] = light.cosatt[2];
+
+        if (fabs(light.distatt[0]) < 0.00001f && fabs(light.distatt[1]) < 0.00001f &&
+            fabs(light.distatt[2]) < 0.00001f)
         {
-          if (std::find(texture_names.begin(), texture_names.end(),
-                        cache_entry->texture_info_name) == texture_names.end())
-          {
-            texture_names.push_back(cache_entry->texture_info_name);
-            if (editor.IsEnabled())
-            {
-              GraphicsModEditor::DrawCallData data;
-              data.m_id = GraphicsModEditor::DrawCallID{cache_entry->texture_info_name};
-              data.m_projection_type = xfmem.projection.type;
-              data.m_time = std::chrono::steady_clock::now();
-              data.m_texture = cache_entry->texture.get();
-              editor.AddDrawCall(std::move(data));
-            }
-            texture_units.push_back(i);
-          }
+          // dist attenuation, make sure not equal to 0!!!
+          dstlight.distatt[0] = .00001f;
+        }
+        else
+        {
+          dstlight.distatt[0] = light.distatt[0];
+        }
+        dstlight.distatt[1] = light.distatt[1];
+        dstlight.distatt[2] = light.distatt[2];
+
+        dstlight.pos[0] = light.dpos[0];
+        dstlight.pos[1] = light.dpos[1];
+        dstlight.pos[2] = light.dpos[2];
+
+        // TODO: Hardware testing is needed to confirm that this normalization is correct
+        auto sanitize = [](float f) {
+          if (std::isnan(f))
+            return 0.0f;
+          else if (std::isinf(f))
+            return f > 0.0f ? 1.0f : -1.0f;
+          else
+            return f;
+        };
+        double norm = double(light.ddir[0]) * double(light.ddir[0]) +
+                      double(light.ddir[1]) * double(light.ddir[1]) +
+                      double(light.ddir[2]) * double(light.ddir[2]);
+        norm = 1.0 / sqrt(norm);
+        dstlight.dir[0] = sanitize(static_cast<float>(light.ddir[0] * norm));
+        dstlight.dir[1] = sanitize(static_cast<float>(light.ddir[1] * norm));
+        dstlight.dir[2] = sanitize(static_cast<float>(light.ddir[2] * norm));
+
+        XXH3_64bits_reset_withSeed(m_graphics_mod_light_hash_state, m_graphics_mod_hash_seed);
+        // XXH3_64bits_update(m_graphics_mod_light_hash_state, &dstlight.color, sizeof(int4));
+        XXH3_64bits_update(m_graphics_mod_light_hash_state, &dstlight.cosatt, sizeof(float4));
+        XXH3_64bits_update(m_graphics_mod_light_hash_state, &dstlight.distatt, sizeof(float4));
+        // XXH3_64bits_update(m_graphics_mod_light_hash_state, &dstlight.dir, sizeof(float4));
+        const auto light_id =
+            GraphicsMods::LightID(XXH3_64bits_digest(m_graphics_mod_light_hash_state));
+        lights_this_draw.emplace_back(light_id, i);
+
+        if (editor.IsEnabled())
+        {
+          GraphicsModEditor::LightData light_data;
+          light_data.m_id = light_id;
+          light_data.m_create_time = std::chrono::steady_clock::now();
+          light_data.m_color = dstlight.color;
+          light_data.m_cosatt = dstlight.cosatt;
+          light_data.m_dir = dstlight.dir;
+          light_data.m_distatt = dstlight.distatt;
+          light_data.m_pos = dstlight.pos;
+          editor.AddLightData(std::move(light_data));
         }
       }
     }
   }
   vertex_shader_manager.SetConstants(texture_names, xf_state_manager);
+  if (g_ActiveConfig.bGraphicMods)
+  {
+    if (editor.IsEnabled())
+    {
+      for (const auto& light_this_draw : lights_this_draw)
+      {
+        auto& light = vertex_shader_manager.constants.lights[light_this_draw.second];
+        const auto light_id = light_this_draw.first;
+        bool skip = false;
+        GraphicsModActionData::Light light_action_data{&light.color, &light.cosatt, &light.distatt,
+                                                       &light.pos,   &light.dir,    &skip};
+        for (const auto& action : editor.GetLightActions(light_id))
+        {
+          action->OnLight(&light_action_data);
+        }
+        if (skip)
+        {
+          light.color = {};
+          light.cosatt = {};
+          light.distatt = {};
+          light.pos = {};
+          light.dir = {};
+        }
+      }
+    }
+  }
   if (!bpmem.genMode.zfreeze)
   {
     // Must be done after VertexShaderManager::SetConstants()
@@ -609,38 +768,33 @@ void VertexManagerBase::Flush()
   {
     CustomPixelShaderContents custom_pixel_shader_contents;
     std::optional<CustomPixelShader> custom_pixel_shader;
-    std::vector<std::string> custom_pixel_texture_names;
     std::span<u8> custom_pixel_shader_uniforms;
-    for (size_t i = 0; i < texture_names.size(); i++)
+    bool skip = false;
+    if (!texture_units.empty())
     {
-      const std::string& texture_name = texture_names[i];
-      const u32 texture_unit = texture_units[i];
-      bool skip = false;
-      GraphicsModActionData::DrawStarted draw_started{texture_unit, &skip, &custom_pixel_shader,
+      GraphicsModActionData::DrawStarted draw_started{0, &skip, &custom_pixel_shader,
                                                       &custom_pixel_shader_uniforms};
 
       if (editor.IsEnabled())
       {
-        for (const auto& action : editor.GetDrawStartedActions(texture_name))
+        for (const auto& action : editor.GetDrawStartedActions(draw_call_id))
         {
           action->OnDrawStarted(&draw_started);
           if (custom_pixel_shader)
           {
             custom_pixel_shader_contents.shaders.push_back(*custom_pixel_shader);
-            custom_pixel_texture_names.push_back(texture_name);
           }
           custom_pixel_shader = std::nullopt;
         }
       }
       else
       {
-        for (const auto& action : g_graphics_mod_manager->GetDrawStartedActions(texture_name))
+        for (const auto& action : g_graphics_mod_manager->GetDrawStartedActions(draw_call_id))
         {
           action->OnDrawStarted(&draw_started);
           if (custom_pixel_shader)
           {
             custom_pixel_shader_contents.shaders.push_back(*custom_pixel_shader);
-            custom_pixel_texture_names.push_back(texture_name);
           }
           custom_pixel_shader = std::nullopt;
         }
@@ -878,6 +1032,61 @@ void VertexManagerBase::CalculateBinormals(NativeVertexFormat* format)
     vertex_shader_manager.constants.cached_binormal = VertexLoaderManager::binormal_cache;
     vertex_shader_manager.dirty = true;
   }
+}
+
+std::array<float, 4> VertexManagerBase::GetLastWorldspacePosition(NativeVertexFormat* format) const
+{
+  if (m_current_primitive_type != PrimitiveType::Triangles &&
+      m_current_primitive_type != PrimitiveType::TriangleStrip)
+  {
+    return {};
+  }
+
+  // Global matrix ID.
+  u32 mtxIdx = g_main_cp_state.matrix_index_a.PosNormalMtxIdx;
+  const PortableVertexDeclaration vert_decl = format->GetVertexDeclaration();
+
+  // Make sure the buffer contains at least 3 vertices.
+  if ((m_cur_buffer_pointer - m_base_buffer_pointer) < (vert_decl.stride * 3))
+    return {};
+
+  // If this vertex format has per-vertex position matrix IDs, look it up.
+  if (vert_decl.posmtx.enable)
+    mtxIdx = VertexLoaderManager::position_matrix_index_cache[2];
+
+  // Lookup vertices of the last rendered triangle and software-transform them
+  // This allows us to determine the worldspace position.
+  const float* viewspace_pos = &VertexLoaderManager::position_cache[2][0];
+
+  const float* world_matrix = &xfmem.posMatrices[(mtxIdx & 0x3f) * 4];
+  float worldspace_pos[3] = {
+      viewspace_pos[0] * world_matrix[0] + viewspace_pos[1] * world_matrix[1] +
+          viewspace_pos[2] * world_matrix[2] + world_matrix[3],
+      viewspace_pos[0] * world_matrix[4] + viewspace_pos[1] * world_matrix[5] +
+          viewspace_pos[2] * world_matrix[6] + world_matrix[7],
+      viewspace_pos[0] * world_matrix[8] + viewspace_pos[1] * world_matrix[9] +
+          viewspace_pos[2] * world_matrix[10] + world_matrix[11]};
+  worldspace_pos[0] = std::round(worldspace_pos[0] * 1000.0f) / 1000.0f;
+  worldspace_pos[1] = std::round(worldspace_pos[1] * 1000.0f) / 1000.0f;
+  worldspace_pos[2] = std::round(worldspace_pos[2] * 1000.0f) / 1000.0f;
+  return std::array<float, 4>{worldspace_pos[0], worldspace_pos[1], worldspace_pos[2], 1};
+}
+
+bool VertexManagerBase::IsDrawSkinned(NativeVertexFormat* format) const
+{
+  if (m_current_primitive_type != PrimitiveType::Triangles &&
+      m_current_primitive_type != PrimitiveType::TriangleStrip)
+  {
+    return false;
+  }
+
+  const PortableVertexDeclaration vert_decl = format->GetVertexDeclaration();
+
+  // Make sure the buffer contains at least 3 vertices.
+  if ((m_cur_buffer_pointer - m_base_buffer_pointer) < (vert_decl.stride * 3))
+    return false;
+
+  return vert_decl.posmtx.enable;
 }
 
 void VertexManagerBase::UpdatePipelineConfig()

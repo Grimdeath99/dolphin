@@ -6,6 +6,8 @@
 #include <memory>
 #include <vector>
 
+#include <xxhash.h>
+
 #include "Common/BitSet.h"
 #include "Common/CommonTypes.h"
 #include "Common/MathUtil.h"
@@ -220,6 +222,8 @@ private:
 
   void UpdatePipelineConfig();
   void UpdatePipelineObject();
+  bool IsDrawSkinned(NativeVertexFormat* format) const;
+  std::array<float, 4> GetLastWorldspacePosition(NativeVertexFormat* format) const;
 
   bool m_is_flushed = true;
   FlushStatistics m_flush_statistics = {};
@@ -234,6 +238,10 @@ private:
 
   std::unique_ptr<CustomShaderCache> m_custom_shader_cache;
   u64 m_ticks_elapsed;
+
+  XXH3_state_t* m_graphics_mod_id_hash_state;
+  XXH3_state_t* m_graphics_mod_light_hash_state;
+  static const unsigned long long m_graphics_mod_hash_seed = 1;
 
   Common::EventHook m_frame_end_event;
   Common::EventHook m_after_present_event;
