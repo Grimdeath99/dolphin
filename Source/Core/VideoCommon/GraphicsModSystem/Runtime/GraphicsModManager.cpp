@@ -104,12 +104,6 @@ bool GraphicsModManager::Initialize()
 const std::vector<GraphicsModAction*>&
 GraphicsModManager::GetProjectionActions(ProjectionType projection_type) const
 {
-  if (const auto it = m_projection_target_to_actions.find(projection_type);
-      it != m_projection_target_to_actions.end())
-  {
-    return it->second;
-  }
-
   return m_default;
 }
 
@@ -117,20 +111,13 @@ const std::vector<GraphicsModAction*>&
 GraphicsModManager::GetProjectionTextureActions(ProjectionType projection_type,
                                                 const std::string& texture_name) const
 {
-  const auto lookup = fmt::format("{}_{}", texture_name, static_cast<int>(projection_type));
-  if (const auto it = m_projection_texture_target_to_actions.find(lookup);
-      it != m_projection_texture_target_to_actions.end())
-  {
-    return it->second;
-  }
-
   return m_default;
 }
 
 const std::vector<GraphicsModAction*>&
-GraphicsModManager::GetDrawStartedActions(const std::string& texture_name) const
+GraphicsModManager::GetDrawStartedActions(GraphicsMods::DrawCallID draw_call_id) const
 {
-  if (const auto it = m_draw_started_target_to_actions.find(texture_name);
+  if (const auto it = m_draw_started_target_to_actions.find(draw_call_id);
       it != m_draw_started_target_to_actions.end())
   {
     return it->second;
@@ -259,8 +246,8 @@ void GraphicsModManager::Load(const GraphicsModGroupConfig& config)
       const auto add_target = [&](const GraphicsTargetConfig& target) {
         std::visit(
             overloaded{
-                [&](const DrawStartedTextureTarget& the_target) {
-                  m_draw_started_target_to_actions[the_target.m_texture_info_string].push_back(
+                [&](const DrawStartedTarget& the_target) {
+                  m_draw_started_target_to_actions[the_target.m_draw_call_id].push_back(
                       m_actions.back().get());
                 },
                 [&](const LoadTextureTarget& the_target) {
@@ -284,20 +271,6 @@ void GraphicsModManager::Load(const GraphicsModGroupConfig& config)
                   info.m_width = the_target.m_width;
                   info.m_texture_format = the_target.m_texture_format;
                   m_xfb_target_to_actions[info].push_back(m_actions.back().get());
-                },
-                [&](const ProjectionTarget& the_target) {
-                  if (the_target.m_texture_info_string)
-                  {
-                    const auto lookup = fmt::format("{}_{}", *the_target.m_texture_info_string,
-                                                    static_cast<int>(the_target.m_projection_type));
-                    m_projection_texture_target_to_actions[lookup].push_back(
-                        m_actions.back().get());
-                  }
-                  else
-                  {
-                    m_projection_target_to_actions[the_target.m_projection_type].push_back(
-                        m_actions.back().get());
-                  }
                 },
             },
             target);
@@ -359,8 +332,6 @@ void GraphicsModManager::Reset()
 {
   m_actions.clear();
   m_groups.clear();
-  m_projection_target_to_actions.clear();
-  m_projection_texture_target_to_actions.clear();
   m_draw_started_target_to_actions.clear();
   m_load_texture_target_to_actions.clear();
   m_create_texture_target_to_actions.clear();
