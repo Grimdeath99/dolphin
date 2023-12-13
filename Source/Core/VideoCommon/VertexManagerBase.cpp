@@ -772,7 +772,7 @@ void VertexManagerBase::Flush()
     bool skip = false;
     if (!texture_units.empty())
     {
-      GraphicsModActionData::DrawStarted draw_started{0, &skip, &custom_pixel_shader,
+      GraphicsModActionData::DrawStarted draw_started{texture_units, &skip, &custom_pixel_shader,
                                                       &custom_pixel_shader_uniforms};
 
       if (editor.IsEnabled())

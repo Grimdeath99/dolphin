@@ -498,9 +498,13 @@ void CustomPipelineAction::OnDrawStarted(GraphicsModActionData::DrawStarted* dra
       m_last_generated_shader_code.Write("{}", game_texture->m_define_code);
     }
 
-    m_last_generated_shader_code.Write(
-        "#define TEX_COORD{} data.texcoord[data.texmap_to_texcoord_index[{}]].xy\n", 0,
-        draw_started->texture_unit);
+    for (std::size_t i = 0; i < draw_started->texture_units.size(); i++)
+    {
+      const auto& texture_unit = draw_started->texture_units[i];
+      m_last_generated_shader_code.Write(
+          "#define TEX_COORD{} data.texcoord[data.texmap_to_texcoord_index[{}]].xy\n", i,
+          texture_unit);
+    }
     m_last_generated_shader_code.Write("{}", color_shader_data);
   }
   CustomPixelShader custom_pixel_shader;
