@@ -293,13 +293,10 @@ void CustomPipelineAction::OnDrawStarted(GraphicsModActionData::DrawStarted* dra
     return;
   }
 
-  if (!pass.m_pixel_shader.m_asset ||
-      pass.m_pixel_material.m_asset->GetLastLoadedTime() >
-          pass.m_pixel_material.m_cached_write_time ||
-      material_data->shader_asset != pass.m_pixel_shader.m_asset->GetAssetId())
+  if (pass.m_pixel_material.m_asset->GetLastLoadedTime() >
+      pass.m_pixel_material.m_cached_write_time)
   {
-    pass.m_pixel_shader.m_asset = loader.LoadPixelShader(material_data->shader_asset, m_library);
-    pass.m_pixel_shader.m_cached_write_time = pass.m_pixel_shader.m_asset->GetLastLoadedTime();
+    m_last_generated_material_code = ShaderCode{};
     pass.m_pixel_material.m_cached_write_time = pass.m_pixel_material.m_asset->GetLastLoadedTime();
     std::size_t texture_count = 0;
     for (const auto& property : material_data->properties)
@@ -316,16 +313,20 @@ void CustomPipelineAction::OnDrawStarted(GraphicsModActionData::DrawStarted* dra
     pass.m_game_textures.resize(texture_count);
   }
 
+  if (!pass.m_pixel_shader.m_asset ||
+      pass.m_pixel_shader.m_asset->GetLastLoadedTime() > pass.m_pixel_shader.m_cached_write_time ||
+      material_data->shader_asset != pass.m_pixel_shader.m_asset->GetAssetId())
+  {
+    pass.m_pixel_shader.m_asset = loader.LoadPixelShader(material_data->shader_asset, m_library);
+    pass.m_pixel_shader.m_cached_write_time = pass.m_pixel_shader.m_asset->GetLastLoadedTime();
+
+    m_last_generated_shader_code = ShaderCode{};
+  }
+
   const auto shader_data = pass.m_pixel_shader.m_asset->GetData();
   if (!shader_data)
   {
     return;
-  }
-
-  if (pass.m_pixel_shader.m_asset->GetLastLoadedTime() > pass.m_pixel_shader.m_cached_write_time)
-  {
-    m_last_generated_shader_code = ShaderCode{};
-    m_last_generated_material_code = ShaderCode{};
   }
 
   if (shader_data->m_properties.size() != material_data->properties.size())
