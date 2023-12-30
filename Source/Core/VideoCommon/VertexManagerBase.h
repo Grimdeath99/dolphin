@@ -17,11 +17,19 @@
 #include "VideoCommon/ShaderCache.h"
 #include "VideoCommon/VideoEvents.h"
 
+struct CustomPixelShaderContents;
 class CustomShaderCache;
 class DataReader;
+class GeometryShaderManager;
 class NativeVertexFormat;
+class PixelShaderManager;
 class PointerWrap;
 struct PortableVertexDeclaration;
+
+namespace GraphicsModActionData
+{
+struct MeshChunk;
+}
 
 struct Slope
 {
@@ -220,7 +228,12 @@ private:
   // Minimum number of draws per command buffer when attempting to preempt a readback operation.
   static constexpr u32 MINIMUM_DRAW_CALLS_PER_COMMAND_BUFFER_FOR_READBACK = 10;
 
-  void UpdatePipelineConfig();
+  void RenderDrawCall(PixelShaderManager& pixel_shader_manager,
+                      GeometryShaderManager& geometry_shader_manager,
+                      const CustomPixelShaderContents& custom_pixel_shader_contents,
+                      std::span<u8> custom_pixel_shader_uniforms,
+                      const std::optional<GraphicsModActionData::MeshChunk>& mesh_chunk);
+  void UpdatePipelineConfig(NativeVertexFormat* vertex_format, u32 components_available);
   void UpdatePipelineObject();
   bool IsDrawSkinned(NativeVertexFormat* format) const;
   std::array<float, 4> GetLastWorldspacePosition(NativeVertexFormat* format) const;
