@@ -27,6 +27,7 @@
 #include "VideoCommon/GeometryShaderManager.h"
 #include "VideoCommon/GraphicsModEditor/EditorMain.h"
 #include "VideoCommon/GraphicsModEditor/EditorTypes.h"
+#include "VideoCommon/GraphicsModEditor/SceneDumper.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/CustomShaderCache.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionData.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h"
@@ -127,7 +128,10 @@ bool VertexManagerBase::Initialize()
   m_frame_end_event = AfterFrameEvent::Register([this] { OnEndFrame(); }, "VertexManagerBase");
   m_after_present_event = AfterPresentEvent::Register(
       [this](PresentInfo& pi) { m_ticks_elapsed = pi.emulated_timestamp; }, "VertexManagerBase");
-  m_index_generator.Init();
+
+  auto& system = Core::System::GetInstance();
+  auto& editor = system.GetGraphicsModEditor();
+  m_index_generator.Init(editor.IsEnabled());
   m_custom_shader_cache = std::make_unique<CustomShaderCache>();
   m_cpu_cull.Init();
   m_graphics_mod_id_hash_state = XXH3_createState();
@@ -161,10 +165,13 @@ DataReader VertexManagerBase::PrepareForAdditionalData(OpcodeDecoder::Primitive 
   // The SSE vertex loader can write up to 4 bytes past the end
   u32 const needed_vertex_bytes = count * stride + 4;
 
+  auto& system = Core::System::GetInstance();
+  auto& editor = system.GetGraphicsModEditor();
+  const bool supports_primitive_restart =
+      g_ActiveConfig.backend_info.bSupportsPrimitiveRestart && !editor.IsEnabled();
   // We can't merge different kinds of primitives, so we have to flush here
-  PrimitiveType new_primitive_type = g_ActiveConfig.backend_info.bSupportsPrimitiveRestart ?
-                                         primitive_from_gx_pr[primitive] :
-                                         primitive_from_gx[primitive];
+  PrimitiveType new_primitive_type =
+      supports_primitive_restart ? primitive_from_gx_pr[primitive] : primitive_from_gx[primitive];
   if (m_current_primitive_type != new_primitive_type) [[unlikely]]
   {
     Flush();
@@ -245,9 +252,14 @@ u32 VertexManagerBase::GetRemainingIndices(OpcodeDecoder::Primitive primitive) c
 {
   const u32 index_len = MAXIBUFFERSIZE - m_index_generator.GetIndexLen();
 
+  auto& system = Core::System::GetInstance();
+  auto& editor = system.GetGraphicsModEditor();
+  const bool supports_primitive_restart =
+      g_ActiveConfig.backend_info.bSupportsPrimitiveRestart && !editor.IsEnabled();
+
   if (primitive >= Primitive::GX_DRAW_LINES)
   {
-    if (g_Config.UseVSForLinePointExpand())
+    if (g_Config.UseVSForLinePointExpand() && !editor.IsEnabled())
     {
       if (g_Config.backend_info.bSupportsPrimitiveRestart)
       {
@@ -293,7 +305,7 @@ u32 VertexManagerBase::GetRemainingIndices(OpcodeDecoder::Primitive primitive) c
       }
     }
   }
-  else if (g_Config.backend_info.bSupportsPrimitiveRestart)
+  else if (supports_primitive_restart)
   {
     switch (primitive)
     {
@@ -342,6 +354,7 @@ void VertexManagerBase::ResetBuffer(u32 vertex_stride)
   m_cur_buffer_pointer = m_cpu_vertex_buffer.data();
   m_end_buffer_pointer = m_base_buffer_pointer + m_cpu_vertex_buffer.size();
   m_index_generator.Start(m_cpu_index_buffer.data());
+  m_last_reset_pointer = m_cur_buffer_pointer;
 }
 
 void VertexManagerBase::CommitBuffer(u32 num_vertices, u32 vertex_stride, u32 num_indices,
@@ -772,6 +785,38 @@ void VertexManagerBase::Flush()
     if (num_indices == 0)
       return;
 
+    if (editor.IsEnabled())
+    {
+      auto* scene_dumper = editor.GetSceneDumper();
+      if (scene_dumper && scene_dumper->IsRecording())
+      {
+        if (scene_dumper->IsDrawCallInRecording(draw_call_id))
+        {
+          GraphicsModEditor::SceneDumper::DrawData draw_data;
+          draw_data.num_vertices = m_index_generator.GetNumVerts();
+          draw_data.num_indices = m_index_generator.GetIndexLen();
+          draw_data.indices = m_cpu_index_buffer.data();
+          draw_data.vertex_format = VertexLoaderManager::GetCurrentVertexFormat();
+          draw_data.vertices = m_last_reset_pointer;
+          draw_data.primitive_type = m_current_primitive_type;
+          draw_data.enable_blending = bpmem.blendmode.blendenable;
+          if (!draw_data.vertex_format->GetVertexDeclaration().posmtx.enable)
+          {
+            float* pos = &xfmem.posMatrices[g_main_cp_state.matrix_index_a.PosNormalMtxIdx * 4];
+            draw_data.transform = {pos, 12};
+          }
+
+          for (const u32 i : used_textures)
+          {
+            const auto cache_entry = g_texture_cache->Load(TextureInfo::FromStage(i), draw_call_id);
+            draw_data.textures.emplace_back(GraphicsModEditor::SceneDumper::DrawData::Texture{
+                cache_entry->texture.get(), cache_entry->texture_info_name});
+          }
+          scene_dumper->AddDataToRecording(draw_call_id, std::move(draw_data));
+        }
+      }
+    }
+
     // Texture loading can cause palettes to be applied (-> uniforms -> draws).
     // Palette application does not use vertices, only a full-screen quad, so this is okay.
     // Same with GPU texture decoding, which uses compute shaders.
@@ -782,7 +827,8 @@ void VertexManagerBase::Flush()
     std::span<u8> custom_pixel_shader_uniforms;
     bool skip = false;
     const auto emulation_defined_primitive_type = m_current_primitive_type;
-    const auto emulation_defined_cull_mode = m_current_pipeline_config.rasterization_state.cullmode.Value();
+    const auto emulation_defined_cull_mode =
+        m_current_pipeline_config.rasterization_state.cullmode.Value();
     if (g_ActiveConfig.bGraphicMods)
     {
       bool more_data = true;
@@ -824,8 +870,7 @@ void VertexManagerBase::Flush()
                 m_rasterization_state_changed = true;
               }
               const auto desired_cull_mode = CullMode::Back;
-              if (desired_cull_mode !=
-                  m_current_pipeline_config.rasterization_state.cullmode)
+              if (desired_cull_mode != m_current_pipeline_config.rasterization_state.cullmode)
               {
                 m_rasterization_state_changed = true;
               }
@@ -1313,8 +1358,10 @@ void VertexManagerBase::UpdatePipelineObject()
 
 void VertexManagerBase::OnConfigChange()
 {
+  auto& system = Core::System::GetInstance();
+  auto& editor = system.GetGraphicsModEditor();
   // Reload index generator function tables in case VS expand config changed
-  m_index_generator.Init();
+  m_index_generator.Init(editor.IsEnabled());
 }
 
 void VertexManagerBase::OnDraw()
