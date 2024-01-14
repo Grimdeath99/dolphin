@@ -808,7 +808,7 @@ void VertexManagerBase::Flush()
 
           for (const u32 i : used_textures)
           {
-            const auto cache_entry = g_texture_cache->Load(TextureInfo::FromStage(i), draw_call_id);
+            const auto cache_entry = g_texture_cache->Load(TextureInfo::FromStage(i));
             draw_data.textures.emplace_back(GraphicsModEditor::SceneDumper::DrawData::Texture{
                 cache_entry->texture.get(), cache_entry->texture_info_name});
           }
