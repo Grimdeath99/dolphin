@@ -233,9 +233,21 @@ private:
                       GeometryShaderManager& geometry_shader_manager,
                       const CustomPixelShaderContents& custom_pixel_shader_contents,
                       std::span<u8> custom_pixel_shader_uniforms,
-                      const std::optional<GraphicsModActionData::MeshChunk>& mesh_chunk);
-  void UpdatePipelineConfig(NativeVertexFormat* vertex_format, u32 components_available);
+                      const std::optional<GraphicsModActionData::MeshChunk>& mesh_chunk,
+                      PrimitiveType primitive_type, const AbstractPipeline* current_pipeline);
+  void UpdatePipelineConfig();
   void UpdatePipelineObject();
+
+  static VideoCommon::GXPipelineUid
+  GetPipelineState(const GraphicsModActionData::MeshChunk& mesh_chunk);
+  static VideoCommon::GXUberPipelineUid
+  GetUberPipelineState(const GraphicsModActionData::MeshChunk& mesh_chunk);
+  const AbstractPipeline*
+  GetCustomPipeline(const CustomPixelShaderContents& custom_pixel_shader_contents,
+                    const VideoCommon::GXPipelineUid& current_pipeline_config,
+                    const VideoCommon::GXUberPipelineUid& current_uber_pipeline_confi,
+                    const AbstractPipeline* current_pipeline) const;
+
   bool IsDrawSkinned(NativeVertexFormat* format) const;
   std::array<float, 4> GetLastWorldspacePosition(NativeVertexFormat* format) const;
 

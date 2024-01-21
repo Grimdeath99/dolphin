@@ -640,6 +640,8 @@ void VertexManagerBase::Flush()
       data.m_world_position =
           GetLastWorldspacePosition(VertexLoaderManager::GetCurrentVertexFormat());
 
+      data.m_cull_mode = bpmem.genMode.cullmode;
+
       // Blending
       data.m_blendenable = bpmem.blendmode.blendenable;
       data.m_logicopenable = bpmem.blendmode.logicopenable;
@@ -826,9 +828,6 @@ void VertexManagerBase::Flush()
     std::optional<CustomPixelShader> custom_pixel_shader;
     std::span<u8> custom_pixel_shader_uniforms;
     bool skip = false;
-    const auto emulation_defined_primitive_type = m_current_primitive_type;
-    const auto emulation_defined_cull_mode =
-        m_current_pipeline_config.rasterization_state.cullmode.Value();
     if (g_ActiveConfig.bGraphicMods)
     {
       bool more_data = true;
@@ -857,31 +856,26 @@ void VertexManagerBase::Flush()
             action->OnDrawStarted(&draw_started);
             if (custom_pixel_shader)
             {
+              custom_pixel_shader_contents.shaders.clear();
               custom_pixel_shader_contents.shaders.push_back(*custom_pixel_shader);
             }
             custom_pixel_shader = std::nullopt;
 
             if (mesh_chunk)
             {
-              skip = true;
-              if (mesh_chunk->primitive_type != m_current_primitive_type)
+              if (const auto current_pipeline =
+                      GetCustomPipeline(custom_pixel_shader_contents, GetPipelineState(*mesh_chunk),
+                                        GetUberPipelineState(*mesh_chunk), nullptr))
               {
-                m_current_primitive_type = mesh_chunk->primitive_type;
-                m_rasterization_state_changed = true;
+                vertex_shader_manager.SetVertexFormat(
+                    mesh_chunk->components_available,
+                    mesh_chunk->vertex_format->GetVertexDeclaration());
+                memcpy(vertex_shader_manager.constants.custom_transform.data(),
+                       mesh_chunk->transform.data.data(), 4 * sizeof(float4));
+                RenderDrawCall(pixel_shader_manager, geometry_shader_manager,
+                               custom_pixel_shader_contents, custom_pixel_shader_uniforms,
+                               mesh_chunk, mesh_chunk->primitive_type, current_pipeline);
               }
-              const auto desired_cull_mode = CullMode::Back;
-              if (desired_cull_mode != m_current_pipeline_config.rasterization_state.cullmode)
-              {
-                m_rasterization_state_changed = true;
-              }
-              vertex_shader_manager.SetVertexFormat(
-                  mesh_chunk->components_available,
-                  mesh_chunk->vertex_format->GetVertexDeclaration());
-              memcpy(vertex_shader_manager.constants.custom_transform.data(),
-                     mesh_chunk->transform.data.data(), 4 * sizeof(float4));
-              RenderDrawCall(pixel_shader_manager, geometry_shader_manager,
-                             custom_pixel_shader_contents, custom_pixel_shader_uniforms,
-                             mesh_chunk);
             }
           }
         }
@@ -902,23 +896,38 @@ void VertexManagerBase::Flush()
 
     if (!skip)
     {
-      if (emulation_defined_primitive_type != m_current_primitive_type)
+      UpdatePipelineConfig();
+      UpdatePipelineObject();
+      if (m_current_pipeline_object)
       {
-        m_current_primitive_type = emulation_defined_primitive_type;
-        m_rasterization_state_changed = true;
+        static const auto identity_mat = Common::Matrix44::Identity();
+        memcpy(vertex_shader_manager.constants.custom_transform.data(), identity_mat.data.data(),
+               4 * sizeof(float4));
+        const AbstractPipeline* pipeline_object = m_current_pipeline_object;
+        if (!custom_pixel_shader_contents.shaders.empty())
+        {
+          if (const auto custom_pipeline =
+                  GetCustomPipeline(custom_pixel_shader_contents, m_current_pipeline_config,
+                                    m_current_uber_pipeline_config, m_current_pipeline_object))
+          {
+            pipeline_object = custom_pipeline;
+          }
+        }
+        RenderDrawCall(pixel_shader_manager, geometry_shader_manager, custom_pixel_shader_contents,
+                       custom_pixel_shader_uniforms, std::nullopt, m_current_primitive_type,
+                       pipeline_object);
       }
-      if (emulation_defined_cull_mode != m_current_pipeline_config.rasterization_state.cullmode)
-      {
-        m_current_pipeline_config.rasterization_state.cullmode = emulation_defined_cull_mode;
-        m_current_uber_pipeline_config.rasterization_state.cullmode = emulation_defined_cull_mode;
-        m_rasterization_state_changed = true;
-      }
-      static const auto identity_mat = Common::Matrix44::Identity();
-      memcpy(vertex_shader_manager.constants.custom_transform.data(), identity_mat.data.data(),
-             4 * sizeof(float4));
-      RenderDrawCall(pixel_shader_manager, geometry_shader_manager, custom_pixel_shader_contents,
-                     custom_pixel_shader_uniforms, std::nullopt);
     }
+
+    INCSTAT(g_stats.this_frame.num_draw_calls);
+
+    if (PerfQueryBase::ShouldEmulate())
+      g_perf_query->DisableQuery(bpmem.zcontrol.early_ztest ? PQG_ZCOMP_ZCOMPLOC : PQG_ZCOMP);
+
+    OnDraw();
+
+    // The EFB cache is now potentially stale.
+    g_framebuffer_manager->FlagPeekCacheAsOutOfDate();
   }
 
   if (xfmem.numTexGen.numTexGens != bpmem.genMode.numtexgens)
@@ -933,10 +942,11 @@ void VertexManagerBase::RenderDrawCall(
     PixelShaderManager& pixel_shader_manager, GeometryShaderManager& geometry_shader_manager,
     const CustomPixelShaderContents& custom_pixel_shader_contents,
     std::span<u8> custom_pixel_shader_uniforms,
-    const std::optional<GraphicsModActionData::MeshChunk>& mesh_chunk)
+    const std::optional<GraphicsModActionData::MeshChunk>& mesh_chunk, PrimitiveType primitive_type,
+    const AbstractPipeline* current_pipeline)
 {
   // Now we can upload uniforms, as nothing else will override them.
-  geometry_shader_manager.SetConstants(m_current_primitive_type);
+  geometry_shader_manager.SetConstants(primitive_type);
   pixel_shader_manager.SetConstants();
   if (!custom_pixel_shader_uniforms.empty() &&
       pixel_shader_manager.custom_constants.data() != custom_pixel_shader_uniforms.data())
@@ -946,120 +956,35 @@ void VertexManagerBase::RenderDrawCall(
   pixel_shader_manager.custom_constants = custom_pixel_shader_uniforms;
   UploadUniforms();
 
-  // Update the pipeline, or compile one if needed.
-  if (mesh_chunk)
+  g_gfx->SetPipeline(current_pipeline);
+  if (PerfQueryBase::ShouldEmulate())
+    g_perf_query->EnableQuery(bpmem.zcontrol.early_ztest ? PQG_ZCOMP_ZCOMPLOC : PQG_ZCOMP);
+
+  if (!mesh_chunk)
   {
-    UpdatePipelineConfig(mesh_chunk->vertex_format, mesh_chunk->components_available);
-    m_current_pipeline_config.rasterization_state.cullmode = mesh_chunk->cull_mode;
-    m_current_uber_pipeline_config.rasterization_state.cullmode = mesh_chunk->cull_mode;
+    u32 base_vertex, base_index;
+    CommitBuffer(m_index_generator.GetNumVerts(),
+                 VertexLoaderManager::GetCurrentVertexFormat()->GetVertexStride(),
+                 m_index_generator.GetIndexLen(), &base_vertex, &base_index);
+
+    if (g_ActiveConfig.backend_info.api_type != APIType::D3D &&
+        g_ActiveConfig.UseVSForLinePointExpand() &&
+        (primitive_type == PrimitiveType::Points || primitive_type == PrimitiveType::Lines))
+    {
+      // VS point/line expansion puts the vertex id at gl_VertexID << 2
+      // That means the base vertex has to be adjusted to match
+      // (The shader adds this after shifting right on D3D, so no need to do this)
+      base_vertex <<= 2;
+    }
+
+    DrawCurrentBatch(base_index, m_index_generator.GetIndexLen(), base_vertex);
   }
   else
   {
-    UpdatePipelineConfig(VertexLoaderManager::GetCurrentVertexFormat(),
-                         VertexLoaderManager::g_current_components);
-  }
-  UpdatePipelineObject();
-  if (m_current_pipeline_object)
-  {
-    const AbstractPipeline* current_pipeline = m_current_pipeline_object;
-    if (!custom_pixel_shader_contents.shaders.empty())
-    {
-      CustomShaderInstance custom_shaders;
-      custom_shaders.pixel_contents = std::move(custom_pixel_shader_contents);
-
-      switch (g_ActiveConfig.iShaderCompilationMode)
-      {
-      case ShaderCompilationMode::Synchronous:
-      case ShaderCompilationMode::AsynchronousSkipRendering:
-      {
-        if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
-                m_current_pipeline_config, custom_shaders, m_current_pipeline_object->m_config))
-        {
-          current_pipeline = *pipeline;
-        }
-      }
-      break;
-      case ShaderCompilationMode::SynchronousUberShaders:
-      {
-        // D3D has issues compiling large custom ubershaders
-        // use specialized shaders instead
-        if (g_ActiveConfig.backend_info.api_type == APIType::D3D)
-        {
-          if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
-                  m_current_pipeline_config, custom_shaders, m_current_pipeline_object->m_config))
-          {
-            current_pipeline = *pipeline;
-          }
-        }
-        else
-        {
-          if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
-                  m_current_uber_pipeline_config, custom_shaders,
-                  m_current_pipeline_object->m_config))
-          {
-            current_pipeline = *pipeline;
-          }
-        }
-      }
-      break;
-      case ShaderCompilationMode::AsynchronousUberShaders:
-      {
-        if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
-                m_current_pipeline_config, custom_shaders, m_current_pipeline_object->m_config))
-        {
-          current_pipeline = *pipeline;
-        }
-        else if (auto uber_pipeline = m_custom_shader_cache->GetPipelineAsync(
-                     m_current_uber_pipeline_config, custom_shaders,
-                     m_current_pipeline_object->m_config))
-        {
-          current_pipeline = *uber_pipeline;
-        }
-      }
-      break;
-      };
-    }
-    g_gfx->SetPipeline(current_pipeline);
-    if (PerfQueryBase::ShouldEmulate())
-      g_perf_query->EnableQuery(bpmem.zcontrol.early_ztest ? PQG_ZCOMP_ZCOMPLOC : PQG_ZCOMP);
-
-    if (!mesh_chunk)
-    {
-      u32 base_vertex, base_index;
-      CommitBuffer(m_index_generator.GetNumVerts(),
-                   VertexLoaderManager::GetCurrentVertexFormat()->GetVertexStride(),
-                   m_index_generator.GetIndexLen(), &base_vertex, &base_index);
-
-      if (g_ActiveConfig.backend_info.api_type != APIType::D3D &&
-          g_ActiveConfig.UseVSForLinePointExpand() &&
-          (m_current_primitive_type == PrimitiveType::Points ||
-           m_current_primitive_type == PrimitiveType::Lines))
-      {
-        // VS point/line expansion puts the vertex id at gl_VertexID << 2
-        // That means the base vertex has to be adjusted to match
-        // (The shader adds this after shifting right on D3D, so no need to do this)
-        base_vertex <<= 2;
-      }
-
-      DrawCurrentBatch(base_index, m_index_generator.GetIndexLen(), base_vertex);
-      INCSTAT(g_stats.this_frame.num_draw_calls);
-
-      if (PerfQueryBase::ShouldEmulate())
-        g_perf_query->DisableQuery(bpmem.zcontrol.early_ztest ? PQG_ZCOMP_ZCOMPLOC : PQG_ZCOMP);
-
-      OnDraw();
-    }
-    else
-    {
-      u32 base_vertex, base_index;
-      UploadUtilityVertices(mesh_chunk->vertices, mesh_chunk->vertex_stride,
-                            mesh_chunk->num_vertices, mesh_chunk->indices, mesh_chunk->num_indices,
-                            &base_vertex, &base_index);
-      g_gfx->DrawIndexed(base_index, mesh_chunk->num_indices, base_vertex);
-    }
-
-    // The EFB cache is now potentially stale.
-    g_framebuffer_manager->FlagPeekCacheAsOutOfDate();
+    u32 base_vertex, base_index;
+    UploadUtilityVertices(mesh_chunk->vertices, mesh_chunk->vertex_stride, mesh_chunk->num_vertices,
+                          mesh_chunk->indices, mesh_chunk->num_indices, &base_vertex, &base_index);
+    g_gfx->DrawIndexed(base_index, mesh_chunk->num_indices, base_vertex);
   }
 }
 
@@ -1224,9 +1149,9 @@ bool VertexManagerBase::IsDrawSkinned(NativeVertexFormat* format) const
   return vert_decl.posmtx.enable;
 }
 
-void VertexManagerBase::UpdatePipelineConfig(NativeVertexFormat* vertex_format,
-                                             u32 components_available)
+void VertexManagerBase::UpdatePipelineConfig()
 {
+  NativeVertexFormat* vertex_format = VertexLoaderManager::GetCurrentVertexFormat();
   if (vertex_format != m_current_pipeline_config.vertex_format)
   {
     m_current_pipeline_config.vertex_format = vertex_format;
@@ -1235,7 +1160,7 @@ void VertexManagerBase::UpdatePipelineConfig(NativeVertexFormat* vertex_format,
     m_pipeline_config_changed = true;
   }
 
-  VertexShaderUid vs_uid = GetVertexShaderUid(components_available);
+  VertexShaderUid vs_uid = GetVertexShaderUid();
   if (vs_uid != m_current_pipeline_config.vs_uid)
   {
     m_current_pipeline_config.vs_uid = vs_uid;
@@ -1497,4 +1422,240 @@ void VertexManagerBase::NotifyCustomShaderCacheOfHostChange(const ShaderHostConf
 {
   m_custom_shader_cache->SetHostConfig(host_config);
   m_custom_shader_cache->Reload();
+}
+
+VideoCommon::GXPipelineUid
+VertexManagerBase::GetPipelineState(const GraphicsModActionData::MeshChunk& mesh_chunk)
+{
+  VideoCommon::GXPipelineUid result;
+  result.vertex_format = mesh_chunk.vertex_format;
+  result.vs_uid = GetVertexShaderUid();
+  vertex_shader_uid_data* const vs_uid_data = result.vs_uid.GetUidData();
+  vs_uid_data->components = mesh_chunk.components_available;
+
+  auto& tex_coords = mesh_chunk.vertex_format->GetVertexDeclaration().texcoords;
+  u32 texcoord_count = 0;
+  for (u32 i = 0; i < 8; ++i)
+  {
+    auto& texcoord = tex_coords[i];
+    if (texcoord.enable)
+    {
+      if ((vs_uid_data->components & (VB_HAS_UV0 << i)) != 0)
+      {
+        auto& texinfo = vs_uid_data->texMtxInfo[texcoord_count];
+        texinfo.texgentype = TexGenType::Passthrough;
+        texinfo.inputform = TexInputForm::ABC1;
+        texinfo.sourcerow = static_cast<SourceRow>(static_cast<u32>(SourceRow::Tex0) + i);
+      }
+      texcoord_count++;
+    }
+  }
+  vs_uid_data->numTexGens = texcoord_count;
+
+  auto& colors = mesh_chunk.vertex_format->GetVertexDeclaration().colors;
+  u32 color_count = 0;
+  for (u32 i = 0; i < 2; ++i)
+  {
+    auto& color = colors[i];
+    if (color.enable)
+    {
+      color_count++;
+    }
+  }
+  vs_uid_data->numColorChans = color_count;
+
+  vs_uid_data->dualTexTrans_enabled = false;
+
+  result.ps_uid = GetPixelShaderUid();
+  pixel_shader_uid_data* const ps_uid_data = result.ps_uid.GetUidData();
+  ps_uid_data->useDstAlpha = false;
+
+  ps_uid_data->genMode_numindstages = 0;
+  ps_uid_data->genMode_numtevstages = 0;
+  ps_uid_data->genMode_numtexgens = vs_uid_data->numTexGens;
+  ps_uid_data->bounding_box = false;
+  ps_uid_data->rgba6_format = false;
+  ps_uid_data->dither = false;
+  ps_uid_data->uint_output = false;
+
+  geometry_shader_uid_data* const gs_uid_data = result.gs_uid.GetUidData();
+  gs_uid_data->primitive_type = static_cast<u32>(mesh_chunk.primitive_type);
+  gs_uid_data->numTexGens = vs_uid_data->numTexGens;
+
+  result.rasterization_state.cullmode = mesh_chunk.cull_mode;
+  result.rasterization_state.primitive = mesh_chunk.primitive_type;
+  result.depth_state.func = CompareMode::LEqual;
+  result.depth_state.testenable = true;
+  result.depth_state.updateenable = true;
+  result.blending_state = RenderState::GetNoBlendingBlendState();
+  //result.depth_state.Generate(bpmem);
+  //result.blending_state.Generate(bpmem);
+  /*result.blending_state.blendenable = true;
+  result.blending_state.srcfactor = SrcBlendFactor::SrcAlpha;
+  result.blending_state.dstfactor = DstBlendFactor::InvSrcAlpha;
+  result.blending_state.srcfactoralpha = SrcBlendFactor::Zero;
+  result.blending_state.dstfactoralpha = DstBlendFactor::One;*/
+
+  return result;
+}
+
+VideoCommon::GXUberPipelineUid
+VertexManagerBase::GetUberPipelineState(const GraphicsModActionData::MeshChunk& mesh_chunk)
+{
+  VideoCommon::GXUberPipelineUid result;
+  result.vertex_format =
+      VertexLoaderManager::GetUberVertexFormat(mesh_chunk.vertex_format->GetVertexDeclaration());
+  result.vs_uid = UberShader::GetVertexShaderUid();
+  UberShader::vertex_ubershader_uid_data* const vs_uid_data = result.vs_uid.GetUidData();
+
+  auto& tex_coords = mesh_chunk.vertex_format->GetVertexDeclaration().texcoords;
+  u32 texcoord_count = 0;
+  for (u32 i = 0; i < 8; ++i)
+  {
+    auto& texcoord = tex_coords[i];
+    if (texcoord.enable)
+    {
+      texcoord_count++;
+    }
+  }
+  vs_uid_data->num_texgens = texcoord_count;
+
+  result.ps_uid = UberShader::GetPixelShaderUid();
+  UberShader::pixel_ubershader_uid_data* const ps_uid_data = result.ps_uid.GetUidData();
+  ps_uid_data->num_texgens = vs_uid_data->num_texgens;
+  ps_uid_data->uint_output = false;
+
+  geometry_shader_uid_data* const gs_uid_data = result.gs_uid.GetUidData();
+  gs_uid_data->primitive_type = static_cast<u32>(mesh_chunk.primitive_type);
+  gs_uid_data->numTexGens = vs_uid_data->num_texgens;
+
+  result.rasterization_state.cullmode = mesh_chunk.cull_mode;
+  result.rasterization_state.primitive = mesh_chunk.primitive_type;
+  result.depth_state.func = CompareMode::LEqual;
+  result.depth_state.testenable = true;
+  result.depth_state.updateenable = true;
+  result.blending_state = RenderState::GetNoBlendingBlendState();
+  //result.depth_state.Generate(bpmem);
+  //result.blending_state.Generate(bpmem);
+  /*result.blending_state.blendenable = true;
+  result.blending_state.srcfactor = SrcBlendFactor::SrcAlpha;
+  result.blending_state.dstfactor = DstBlendFactor::InvSrcAlpha;
+  result.blending_state.srcfactoralpha = SrcBlendFactor::Zero;
+  result.blending_state.dstfactoralpha = DstBlendFactor::One;*/
+
+  return result;
+}
+
+const AbstractPipeline* VertexManagerBase::GetCustomPipeline(
+    const CustomPixelShaderContents& custom_pixel_shader_contents,
+    const VideoCommon::GXPipelineUid& current_pipeline_config,
+    const VideoCommon::GXUberPipelineUid& current_uber_pipeline_config,
+    const AbstractPipeline* current_pipeline) const
+{
+  if (current_pipeline)
+  {
+    if (!custom_pixel_shader_contents.shaders.empty())
+    {
+      CustomShaderInstance custom_shaders;
+      custom_shaders.pixel_contents = custom_pixel_shader_contents;
+      switch (g_ActiveConfig.iShaderCompilationMode)
+      {
+      case ShaderCompilationMode::Synchronous:
+      case ShaderCompilationMode::AsynchronousSkipRendering:
+      {
+        if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
+                current_pipeline_config, custom_shaders, current_pipeline->m_config))
+        {
+          return *pipeline;
+        }
+      }
+      break;
+      case ShaderCompilationMode::SynchronousUberShaders:
+      {
+        // D3D has issues compiling large custom ubershaders
+        // use specialized shaders instead
+        if (g_ActiveConfig.backend_info.api_type == APIType::D3D)
+        {
+          if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
+                  current_pipeline_config, custom_shaders, current_pipeline->m_config))
+          {
+            return *pipeline;
+          }
+        }
+        else
+        {
+          if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
+                  current_uber_pipeline_config, custom_shaders, current_pipeline->m_config))
+          {
+            return *pipeline;
+          }
+        }
+      }
+      break;
+      case ShaderCompilationMode::AsynchronousUberShaders:
+      {
+        if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
+                current_pipeline_config, custom_shaders, current_pipeline->m_config))
+        {
+          return *pipeline;
+        }
+        else if (auto uber_pipeline = m_custom_shader_cache->GetPipelineAsync(
+                     current_uber_pipeline_config, custom_shaders, current_pipeline->m_config))
+        {
+          return *uber_pipeline;
+        }
+      }
+      break;
+      };
+    }
+  }
+  else
+  {
+    switch (g_ActiveConfig.iShaderCompilationMode)
+    {
+    case ShaderCompilationMode::Synchronous:
+    {
+      // Ubershaders disabled? Block and compile the specialized shader.
+      const auto base_pipeline = m_custom_shader_cache->GetPipelineForUid(current_pipeline_config);
+      return GetCustomPipeline(custom_pixel_shader_contents, current_pipeline_config,
+                               current_uber_pipeline_config, base_pipeline);
+    }
+
+    case ShaderCompilationMode::SynchronousUberShaders:
+    {
+      // Exclusive ubershader mode, always use ubershaders.
+      const auto base_pipeline =
+          m_custom_shader_cache->GetUberPipelineForUid(current_uber_pipeline_config);
+      return GetCustomPipeline(custom_pixel_shader_contents, current_pipeline_config,
+                               current_uber_pipeline_config, base_pipeline);
+    }
+
+    case ShaderCompilationMode::AsynchronousUberShaders:
+    case ShaderCompilationMode::AsynchronousSkipRendering:
+    {
+      // Can we background compile shaders? If so, get the pipeline asynchronously.
+      auto res = m_custom_shader_cache->GetPipelineForUidAsync(current_pipeline_config);
+      if (res)
+      {
+        // Specialized shaders are ready, prefer these.
+        const auto base_pipeline = *res;
+        if (base_pipeline == nullptr)
+          return nullptr;
+        return GetCustomPipeline(custom_pixel_shader_contents, current_pipeline_config,
+                                 current_uber_pipeline_config, base_pipeline);
+      }
+
+      if (g_ActiveConfig.iShaderCompilationMode == ShaderCompilationMode::AsynchronousUberShaders)
+      {
+        // Specialized shaders not ready, use the ubershaders.
+        const auto base_pipeline =
+            m_custom_shader_cache->GetUberPipelineForUid(current_uber_pipeline_config);
+        return GetCustomPipeline(custom_pixel_shader_contents, current_pipeline_config,
+                                 current_uber_pipeline_config, base_pipeline);
+      }
+    }
+    }
+  }
+
+  return nullptr;
 }
