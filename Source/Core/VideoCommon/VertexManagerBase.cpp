@@ -875,6 +875,9 @@ void VertexManagerBase::Flush()
                 RenderDrawCall(pixel_shader_manager, geometry_shader_manager,
                                custom_pixel_shader_contents, custom_pixel_shader_uniforms,
                                mesh_chunk, mesh_chunk->primitive_type, current_pipeline);
+
+                // For now skip the normal mesh
+                skip = true;
               }
             }
           }
@@ -1488,8 +1491,8 @@ VertexManagerBase::GetPipelineState(const GraphicsModActionData::MeshChunk& mesh
   result.depth_state.testenable = true;
   result.depth_state.updateenable = true;
   result.blending_state = RenderState::GetNoBlendingBlendState();
-  //result.depth_state.Generate(bpmem);
-  //result.blending_state.Generate(bpmem);
+  // result.depth_state.Generate(bpmem);
+  // result.blending_state.Generate(bpmem);
   /*result.blending_state.blendenable = true;
   result.blending_state.srcfactor = SrcBlendFactor::SrcAlpha;
   result.blending_state.dstfactor = DstBlendFactor::InvSrcAlpha;
@@ -1535,8 +1538,8 @@ VertexManagerBase::GetUberPipelineState(const GraphicsModActionData::MeshChunk& 
   result.depth_state.testenable = true;
   result.depth_state.updateenable = true;
   result.blending_state = RenderState::GetNoBlendingBlendState();
-  //result.depth_state.Generate(bpmem);
-  //result.blending_state.Generate(bpmem);
+  // result.depth_state.Generate(bpmem);
+  // result.blending_state.Generate(bpmem);
   /*result.blending_state.blendenable = true;
   result.blending_state.srcfactor = SrcBlendFactor::SrcAlpha;
   result.blending_state.dstfactor = DstBlendFactor::InvSrcAlpha;
