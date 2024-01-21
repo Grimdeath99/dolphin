@@ -14,7 +14,7 @@
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/XFMemory.h"
 
-VertexShaderUid GetVertexShaderUid(u32 components_available)
+VertexShaderUid GetVertexShaderUid()
 {
   ASSERT(bpmem.genMode.numtexgens == xfmem.numTexGen.numTexGens);
   ASSERT(bpmem.genMode.numcolchans == xfmem.numChan.numColorChans);
@@ -22,7 +22,7 @@ VertexShaderUid GetVertexShaderUid(u32 components_available)
   VertexShaderUid out;
   vertex_shader_uid_data* const uid_data = out.GetUidData();
   uid_data->numTexGens = xfmem.numTexGen.numTexGens;
-  uid_data->components = components_available;
+  uid_data->components = VertexLoaderManager::g_current_components;
   uid_data->numColorChans = xfmem.numChan.numColorChans;
 
   GetLightingShaderUid(uid_data->lighting);

@@ -88,6 +88,6 @@ struct vertex_shader_uid_data
 
 using VertexShaderUid = ShaderUid<vertex_shader_uid_data>;
 
-VertexShaderUid GetVertexShaderUid(u32 components_available);
+VertexShaderUid GetVertexShaderUid();
 ShaderCode GenerateVertexShaderCode(APIType api_type, const ShaderHostConfig& host_config,
                                     const vertex_shader_uid_data* uid_data);
