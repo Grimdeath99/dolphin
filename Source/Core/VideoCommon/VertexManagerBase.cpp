@@ -7,6 +7,8 @@
 #include <cmath>
 #include <memory>
 
+#include <xxhash.h>
+
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
 #include "Common/EnumMap.h"
@@ -112,16 +114,29 @@ static bool IsNormalProjection(const Projection::Raw& projection, const Viewport
          config.widescreen_heuristic_aspect_ratio_slop;
 }
 
+struct VertexManagerBase::HashStateImpl
+{
+  HashStateImpl()
+  {
+    m_graphics_mod_id_hash_state = XXH3_createState();
+    m_graphics_mod_light_hash_state = XXH3_createState();
+  }
+  ~HashStateImpl()
+  {
+    XXH3_freeState(m_graphics_mod_id_hash_state);
+    XXH3_freeState(m_graphics_mod_light_hash_state);
+  }
+  XXH3_state_t* m_graphics_mod_id_hash_state;
+  XXH3_state_t* m_graphics_mod_light_hash_state;
+  static const unsigned long long m_graphics_mod_hash_seed = 1;
+};
+
 VertexManagerBase::VertexManagerBase()
     : m_cpu_vertex_buffer(MAXVBUFFERSIZE), m_cpu_index_buffer(MAXIBUFFERSIZE)
 {
 }
 
-VertexManagerBase::~VertexManagerBase()
-{
-  XXH3_freeState(m_graphics_mod_id_hash_state);
-  XXH3_freeState(m_graphics_mod_light_hash_state);
-}
+VertexManagerBase::~VertexManagerBase() = default;
 
 bool VertexManagerBase::Initialize()
 {
@@ -134,8 +149,7 @@ bool VertexManagerBase::Initialize()
   m_index_generator.Init(editor.IsEnabled());
   m_custom_shader_cache = std::make_unique<CustomShaderCache>();
   m_cpu_cull.Init();
-  m_graphics_mod_id_hash_state = XXH3_createState();
-  m_graphics_mod_light_hash_state = XXH3_createState();
+  m_hash_state_impl = std::make_unique<HashStateImpl>();
   return true;
 }
 
@@ -571,7 +585,8 @@ void VertexManagerBase::Flush()
 
   if (g_ActiveConfig.bGraphicMods)
   {
-    XXH3_64bits_reset_withSeed(m_graphics_mod_id_hash_state, m_graphics_mod_hash_seed);
+    XXH3_64bits_reset_withSeed(m_hash_state_impl->m_graphics_mod_id_hash_state,
+                               m_hash_state_impl->m_graphics_mod_hash_seed);
   }
 
   CalculateBinormals(VertexLoaderManager::GetCurrentVertexFormat());
@@ -596,7 +611,8 @@ void VertexManagerBase::Flush()
         }
         texture_units.push_back(i);
 
-        XXH3_64bits_update(m_graphics_mod_id_hash_state, cache_entry->texture_info_name.data(),
+        XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_id_hash_state,
+                           cache_entry->texture_info_name.data(),
                            cache_entry->texture_info_name.size());
       }
     }
@@ -609,27 +625,31 @@ void VertexManagerBase::Flush()
         static_cast<double>(m_ticks_elapsed) / system.GetSystemTimers().GetTicksPerSecond();
     pixel_shader_manager.constants.time_ms = seconds_elapsed * 1000;
 
-    XXH3_64bits_update(m_graphics_mod_id_hash_state, &xfmem.projection.type,
+    XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_id_hash_state, &xfmem.projection.type,
                        sizeof(ProjectionType));
-    XXH3_64bits_update(m_graphics_mod_id_hash_state, &bpmem.blendmode, sizeof(BlendMode));
+    XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_id_hash_state, &bpmem.blendmode,
+                       sizeof(BlendMode));
     // XXH3_64bits_update(m_graphics_mod_id_hash_state, &xfmem.viewport, sizeof(Viewport));
 
     // if (!IsDrawSkinned(VertexLoaderManager::GetCurrentVertexFormat()))
     {
       // const auto world_pos =
       //     GetLastWorldspacePosition(VertexLoaderManager::GetCurrentVertexFormat());
-      // XXH3_64bits_update(m_graphics_mod_id_hash_state, &world_pos, sizeof(world_pos));
+      // XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_id_hash_state, &world_pos,
+      // sizeof(world_pos));
     }
 
     /*if (!IsDrawSkinned(VertexLoaderManager::GetCurrentVertexFormat()))
     {
-      XXH3_64bits_update(m_graphics_mod_id_hash_state, m_index_generator.GetIndexDataStart(),
-                         sizeof(u16) * m_index_generator.GetIndexLen());
-      const u32 vertex_count = m_index_generator.GetNumVerts();
-      XXH3_64bits_update(m_graphics_mod_id_hash_state, &vertex_count, sizeof(u32));
+      XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_id_hash_state,
+    m_index_generator.GetIndexDataStart(), sizeof(u16) * m_index_generator.GetIndexLen()); const u32
+    vertex_count = m_index_generator.GetNumVerts();
+      XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_id_hash_state, &vertex_count,
+    sizeof(u32));
     }*/
 
-    draw_call_id = GraphicsMods::DrawCallID(XXH3_64bits_digest(m_graphics_mod_id_hash_state));
+    draw_call_id = GraphicsMods::DrawCallID(
+        XXH3_64bits_digest(m_hash_state_impl->m_graphics_mod_id_hash_state));
     if (editor.IsEnabled())
     {
       data.m_id = draw_call_id;
@@ -717,13 +737,18 @@ void VertexManagerBase::Flush()
         dstlight.dir[1] = sanitize(static_cast<float>(light.ddir[1] * norm));
         dstlight.dir[2] = sanitize(static_cast<float>(light.ddir[2] * norm));
 
-        XXH3_64bits_reset_withSeed(m_graphics_mod_light_hash_state, m_graphics_mod_hash_seed);
-        // XXH3_64bits_update(m_graphics_mod_light_hash_state, &dstlight.color, sizeof(int4));
-        XXH3_64bits_update(m_graphics_mod_light_hash_state, &dstlight.cosatt, sizeof(float4));
-        XXH3_64bits_update(m_graphics_mod_light_hash_state, &dstlight.distatt, sizeof(float4));
-        // XXH3_64bits_update(m_graphics_mod_light_hash_state, &dstlight.dir, sizeof(float4));
-        const auto light_id =
-            GraphicsMods::LightID(XXH3_64bits_digest(m_graphics_mod_light_hash_state));
+        XXH3_64bits_reset_withSeed(m_hash_state_impl->m_graphics_mod_light_hash_state,
+                                   m_hash_state_impl->m_graphics_mod_hash_seed);
+        // XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_light_hash_state, &dstlight.color,
+        // sizeof(int4));
+        XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_light_hash_state, &dstlight.cosatt,
+                           sizeof(float4));
+        XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_light_hash_state, &dstlight.distatt,
+                           sizeof(float4));
+        // XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_light_hash_state, &dstlight.dir,
+        // sizeof(float4));
+        const auto light_id = GraphicsMods::LightID(
+            XXH3_64bits_digest(m_hash_state_impl->m_graphics_mod_light_hash_state));
         lights_this_draw.emplace_back(light_id, i);
 
         if (editor.IsEnabled())

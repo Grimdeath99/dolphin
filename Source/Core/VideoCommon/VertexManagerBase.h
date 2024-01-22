@@ -6,8 +6,6 @@
 #include <memory>
 #include <vector>
 
-#include <xxhash.h>
-
 #include "Common/BitSet.h"
 #include "Common/CommonTypes.h"
 #include "Common/MathUtil.h"
@@ -265,9 +263,10 @@ private:
   std::unique_ptr<CustomShaderCache> m_custom_shader_cache;
   u64 m_ticks_elapsed;
 
-  XXH3_state_t* m_graphics_mod_id_hash_state;
-  XXH3_state_t* m_graphics_mod_light_hash_state;
-  static const unsigned long long m_graphics_mod_hash_seed = 1;
+  // Since Core includes VertexManagerBase and also uses an older xxhash
+  // due to lz4, we need to hide away the hash details inside an impl
+  struct HashStateImpl;
+  std::unique_ptr<HashStateImpl> m_hash_state_impl;
 
   Common::EventHook m_frame_end_event;
   Common::EventHook m_after_present_event;
