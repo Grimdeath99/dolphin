@@ -7,6 +7,7 @@
 
 #include <fmt/format.h>
 
+#include "Common/EnumUtils.h"
 #include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
 #include "Common/VariantUtil.h"
@@ -29,7 +30,7 @@ void WriteToGraphicsMod(const UserData& user_data, GraphicsModConfig* config)
   for (const auto& [draw_call_id, actions] : user_data.m_draw_call_id_to_actions)
   {
     GraphicsTargetGroupConfig group;
-    std::string group_name = fmt::format("group_{}", draw_call_id.m_texture_hash);
+    std::string group_name = fmt::format("group_{}", Common::ToUnderlying(draw_call_id));
     group.m_name = group_name;
     for (const auto& [operation_and_drawcall, action_references] :
          user_data.m_operation_and_draw_call_id_to_actions)
@@ -40,38 +41,24 @@ void WriteToGraphicsMod(const UserData& user_data, GraphicsModConfig* config)
         {
         case OperationAndDrawCallID::Operation::Projection2D:
         {
-          ProjectionTarget target;
-          target.m_projection_type = ProjectionType::Orthographic;
-          target.m_texture_info_string = draw_call_id.m_texture_hash;
-          group.m_targets.push_back(std::move(target));
         }
         break;
         case OperationAndDrawCallID::Operation::Projection3D:
         {
-          ProjectionTarget target;
-          target.m_projection_type = ProjectionType::Perspective;
-          target.m_texture_info_string = draw_call_id.m_texture_hash;
-          group.m_targets.push_back(std::move(target));
         }
         break;
         case OperationAndDrawCallID::Operation::TextureCreate:
         {
-          CreateTextureTarget target;
-          target.m_texture_info_string = draw_call_id.m_texture_hash;
-          group.m_targets.push_back(std::move(target));
         }
         break;
         case OperationAndDrawCallID::Operation::TextureLoad:
         {
-          LoadTextureTarget target;
-          target.m_texture_info_string = draw_call_id.m_texture_hash;
-          group.m_targets.push_back(std::move(target));
         }
         break;
         case OperationAndDrawCallID::Operation::Draw:
         {
-          DrawStartedTextureTarget target;
-          target.m_texture_info_string = draw_call_id.m_texture_hash;
+          DrawStartedTarget target;
+          target.m_draw_call_id = draw_call_id;
           group.m_targets.push_back(std::move(target));
         }
         break;
@@ -104,24 +91,25 @@ void ReadFromGraphicsMod(UserData* user_data, const GraphicsModConfig& config)
 
   user_data->m_asset_library->AddAssets(config.m_assets, user_data->m_current_mod_path);
 
-  std::map<std::string, std::vector<DrawCallID>> group_to_drawcalls;
-  std::map<DrawCallID, std::vector<OperationAndDrawCallID>> drawcall_to_operations;
+  std::map<std::string, std::vector<GraphicsMods::DrawCallID>> group_to_drawcalls;
+  std::map<GraphicsMods::DrawCallID, std::vector<OperationAndDrawCallID>> drawcall_to_operations;
 
-  const auto add_draw_call_target =
-      [&](const auto& group, OperationAndDrawCallID::Operation operation, DrawCallID draw_call) {
-        const auto [operations_iter, added] =
-            drawcall_to_operations.try_emplace(draw_call, std::vector<OperationAndDrawCallID>{});
-        if (added)
-        {
-          const auto [drawcalls_iter, added2] =
-              group_to_drawcalls.try_emplace(group.m_name, std::vector<DrawCallID>{});
-          drawcalls_iter->second.push_back(draw_call);
-        }
-        OperationAndDrawCallID operation_and_drawcall;
-        operation_and_drawcall.m_draw_call_id = draw_call;
-        operation_and_drawcall.m_operation = operation;
-        operations_iter->second.push_back(std::move(operation_and_drawcall));
-      };
+  const auto add_draw_call_target = [&](const auto& group,
+                                        OperationAndDrawCallID::Operation operation,
+                                        GraphicsMods::DrawCallID draw_call) {
+    const auto [operations_iter, added] =
+        drawcall_to_operations.try_emplace(draw_call, std::vector<OperationAndDrawCallID>{});
+    if (added)
+    {
+      const auto [drawcalls_iter, added2] =
+          group_to_drawcalls.try_emplace(group.m_name, std::vector<GraphicsMods::DrawCallID>{});
+      drawcalls_iter->second.push_back(draw_call);
+    }
+    OperationAndDrawCallID operation_and_drawcall;
+    operation_and_drawcall.m_draw_call_id = draw_call;
+    operation_and_drawcall.m_operation = operation;
+    operations_iter->second.push_back(std::move(operation_and_drawcall));
+  };
 
   std::map<std::string, std::vector<FBInfo>> group_to_fbinfo;
 
@@ -129,69 +117,35 @@ void ReadFromGraphicsMod(UserData* user_data, const GraphicsModConfig& config)
   {
     for (const auto& target : group.m_targets)
     {
-      std::visit(
-          overloaded{
-              [&](const DrawStartedTextureTarget& the_target) {
-                DrawCallID draw_call;
-                draw_call.m_texture_hash = the_target.m_texture_info_string;
-                add_draw_call_target(group, OperationAndDrawCallID::Operation::Draw,
-                                     std::move(draw_call));
-              },
-              [&](const LoadTextureTarget& the_target) {
-                DrawCallID draw_call;
-                draw_call.m_texture_hash = the_target.m_texture_info_string;
-                add_draw_call_target(group, OperationAndDrawCallID::Operation::TextureLoad,
-                                     std::move(draw_call));
-              },
-              [&](const CreateTextureTarget& the_target) {
-                DrawCallID draw_call;
-                draw_call.m_texture_hash = the_target.m_texture_info_string;
-                add_draw_call_target(group, OperationAndDrawCallID::Operation::TextureCreate,
-                                     std::move(draw_call));
-              },
-              [&](const EFBTarget& the_target) {
-                FBInfo info;
-                info.m_height = the_target.m_height;
-                info.m_width = the_target.m_width;
-                info.m_texture_format = the_target.m_texture_format;
+      std::visit(overloaded{
+                     [&](const DrawStartedTarget& the_target) {
+                       add_draw_call_target(group, OperationAndDrawCallID::Operation::Draw,
+                                            the_target.m_draw_call_id);
+                     },
+                     [&](const LoadTextureTarget&) {},
+                     [&](const CreateTextureTarget&) {},
+                     [&](const EFBTarget& the_target) {
+                       FBInfo info;
+                       info.m_height = the_target.m_height;
+                       info.m_width = the_target.m_width;
+                       info.m_texture_format = the_target.m_texture_format;
 
-                const auto [it, added] =
-                    group_to_fbinfo.try_emplace(group.m_name, std::vector<FBInfo>{});
-                it->second.push_back(std::move(info));
-              },
-              [&](const XFBTarget& the_target) {
-                FBInfo info;
-                info.m_height = the_target.m_height;
-                info.m_width = the_target.m_width;
-                info.m_texture_format = the_target.m_texture_format;
+                       const auto [it, added] =
+                           group_to_fbinfo.try_emplace(group.m_name, std::vector<FBInfo>{});
+                       it->second.push_back(std::move(info));
+                     },
+                     [&](const XFBTarget& the_target) {
+                       FBInfo info;
+                       info.m_height = the_target.m_height;
+                       info.m_width = the_target.m_width;
+                       info.m_texture_format = the_target.m_texture_format;
 
-                const auto [it, added] =
-                    group_to_fbinfo.try_emplace(group.m_name, std::vector<FBInfo>{});
-                it->second.push_back(std::move(info));
-              },
-              [&](const ProjectionTarget& the_target) {
-                if (the_target.m_texture_info_string)
-                {
-                  DrawCallID draw_call;
-                  draw_call.m_texture_hash = *the_target.m_texture_info_string;
-                  if (the_target.m_projection_type == ProjectionType::Orthographic)
-                  {
-                    add_draw_call_target(group, OperationAndDrawCallID::Operation::Projection2D,
-                                         std::move(draw_call));
-                  }
-                  else
-                  {
-                    add_draw_call_target(group, OperationAndDrawCallID::Operation::Projection3D,
-                                         std::move(draw_call));
-                  }
-                }
-                else
-                {
-                  // TODO support or error
-                }
-              },
-          },
-          target);
+                       const auto [it, added] =
+                           group_to_fbinfo.try_emplace(group.m_name, std::vector<FBInfo>{});
+                       it->second.push_back(std::move(info));
+                     },
+                 },
+                 target);
     }
   }
 

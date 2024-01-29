@@ -21,6 +21,8 @@ std::string_view AssetDragDropTypeFromType(AssetDataType asset_type)
     return "ShaderAsset";
   case Texture:
     return "TextureAsset";
+  case Mesh:
+    return "MeshAsset";
   }
 
   return "";
@@ -48,6 +50,12 @@ AbstractTexture* GenericImageIconFromType(AssetDataType asset_type, const Editor
     {
       return it->second.get();
     }
+  case Mesh:
+    if (const auto it = state.m_editor_data.m_name_to_texture.find("file");
+        it != state.m_editor_data.m_name_to_texture.end())
+    {
+      return it->second.get();
+    }
   }
 
   return nullptr;
@@ -63,6 +71,7 @@ bool AssetDisplay(std::string_view popup_name, EditorState* state,
   if (!asset_id) [[unlikely]]
     return false;
 
+  const std::string reset_popup_name = std::string{popup_name} + "Reset";
   bool changed = false;
   const EditorAsset* asset = nullptr;
   if (!asset_id->empty())
@@ -95,6 +104,15 @@ bool AssetDisplay(std::string_view popup_name, EditorState* state,
         {
           ImGui::OpenPopup(popup_name.data());
         }
+      }
+      if (ImGui::BeginPopupContextItem(reset_popup_name.data()))
+      {
+        if (ImGui::Selectable("Reset"))
+        {
+          *asset_id = "";
+          changed = true;
+        }
+        ImGui::EndPopup();
       }
       ImGui::TextWrapped("%s", PathToString(asset->m_asset_path.stem()).c_str());
     }

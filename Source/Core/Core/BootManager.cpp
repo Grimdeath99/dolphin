@@ -66,11 +66,13 @@ bool BootCore(std::unique_ptr<BootParameters> boot, const WindowSystemInfo& wsi)
     return false;
 
   // Movie settings
-  if (Movie::IsPlayingInput() && Movie::IsConfigSaved())
+  auto& system = Core::System::GetInstance();
+  auto& movie = system.GetMovie();
+  if (movie.IsPlayingInput() && movie.IsConfigSaved())
   {
     for (ExpansionInterface::Slot slot : ExpansionInterface::MEMCARD_SLOTS)
     {
-      if (Movie::IsUsingMemcard(slot) && Movie::IsStartingFromClearSave() && !StartUp.bWii)
+      if (movie.IsUsingMemcard(slot) && movie.IsStartingFromClearSave() && !StartUp.bWii)
       {
         const auto raw_path =
             File::GetUserPath(D_GCUSER_IDX) +
@@ -142,7 +144,7 @@ bool BootCore(std::unique_ptr<BootParameters> boot, const WindowSystemInfo& wsi)
   if (!boot->riivolution_patches.empty())
     Config::SetCurrent(Config::MAIN_FAST_DISC_SPEED, true);
 
-  Core::System::GetInstance().Initialize();
+  system.Initialize();
 
   Core::UpdateWantDeterminism(/*initial*/ true);
 
@@ -165,13 +167,7 @@ bool BootCore(std::unique_ptr<BootParameters> boot, const WindowSystemInfo& wsi)
   }
 
 #ifdef USE_RETRO_ACHIEVEMENTS
-  std::string path = "";
-  if (std::holds_alternative<BootParameters::Disc>(boot->parameters))
-  {
-    path = std::get<BootParameters::Disc>(boot->parameters).path;
-  }
-  AchievementManager::GetInstance()->LoadGameByFilenameAsync(
-      path, [](AchievementManager::ResponseType r_type) {});
+  AchievementManager::GetInstance().SetDisabled(false);
 #endif  // USE_RETRO_ACHIEVEMENTS
 
   const bool load_ipl = !StartUp.bWii && !Config::Get(Config::MAIN_SKIP_IPL) &&
@@ -179,13 +175,14 @@ bool BootCore(std::unique_ptr<BootParameters> boot, const WindowSystemInfo& wsi)
   if (load_ipl)
   {
     return Core::Init(
+        system,
         std::make_unique<BootParameters>(
             BootParameters::IPL{StartUp.m_region,
                                 std::move(std::get<BootParameters::Disc>(boot->parameters))},
             std::move(boot->boot_session_data)),
         wsi);
   }
-  return Core::Init(std::move(boot), wsi);
+  return Core::Init(system, std::move(boot), wsi);
 }
 
 // SYSCONF can be modified during emulation by the user and internally, which makes it

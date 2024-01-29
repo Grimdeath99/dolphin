@@ -16,13 +16,20 @@ namespace GraphicsModEditor::Controls
 TextureControl::TextureControl(EditorState& state) : m_state(state)
 {
 }
-void TextureControl::DrawImGui(VideoCommon::TextureData* texture_data,
+void TextureControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& asset_id,
+                               VideoCommon::TextureData* texture_data,
                                const std::filesystem::path& path,
                                VideoCommon::CustomAssetLibrary::TimeType* last_data_write,
                                AbstractTexture* texture_preview)
 {
   if (ImGui::BeginTable("TextureForm", 2))
   {
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("ID");
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", asset_id.c_str());
+
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     ImGui::Text("Name");

@@ -20,7 +20,8 @@ class TextureControl
 {
 public:
   explicit TextureControl(EditorState& state);
-  void DrawImGui(VideoCommon::TextureData* texture_data, const std::filesystem::path& path,
+  void DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& asset_id,
+                 VideoCommon::TextureData* texture_data, const std::filesystem::path& path,
                  VideoCommon::CustomAssetLibrary::TimeType* last_data_write,
                  AbstractTexture* texture_preview);
 

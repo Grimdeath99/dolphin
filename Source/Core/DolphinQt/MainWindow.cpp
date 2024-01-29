@@ -82,6 +82,7 @@
 #include "DolphinQt/Config/LogWidget.h"
 #include "DolphinQt/Config/Mapping/MappingWindow.h"
 #include "DolphinQt/Config/SettingsWindow.h"
+#include "DolphinQt/Debugger/AssemblerWidget.h"
 #include "DolphinQt/Debugger/BreakpointWidget.h"
 #include "DolphinQt/Debugger/CodeViewWidget.h"
 #include "DolphinQt/Debugger/CodeWidget.h"
@@ -246,12 +247,19 @@ MainWindow::MainWindow(std::unique_ptr<BootParameters> boot_parameters,
   connect(m_cheats_manager, &CheatsManager::OpenGeneralSettings, this,
           &MainWindow::ShowGeneralWindow);
 
+#ifdef USE_RETRO_ACHIEVEMENTS
+  connect(m_cheats_manager, &CheatsManager::OpenAchievementSettings, this,
+          &MainWindow::ShowAchievementSettings);
+  connect(m_game_list, &GameList::OpenAchievementSettings, this,
+          &MainWindow::ShowAchievementSettings);
+#endif  // USE_RETRO_ACHIEVEMENTS
+
   InitCoreCallbacks();
 
   NetPlayInit();
 
 #ifdef USE_RETRO_ACHIEVEMENTS
-  AchievementManager::GetInstance()->Init();
+  AchievementManager::GetInstance().Init();
 #endif  // USE_RETRO_ACHIEVEMENTS
 
 #if defined(__unix__) || defined(__unix) || defined(__APPLE__)
@@ -269,7 +277,7 @@ MainWindow::MainWindow(std::unique_ptr<BootParameters> boot_parameters,
     if (!movie_path.empty())
     {
       std::optional<std::string> savestate_path;
-      if (Movie::PlayInput(movie_path, &savestate_path))
+      if (Core::System::GetInstance().GetMovie().PlayInput(movie_path, &savestate_path))
       {
         m_pending_boot->boot_session_data.SetSavestateData(std::move(savestate_path),
                                                            DeleteSavestateAfterBoot::No);
@@ -320,7 +328,7 @@ MainWindow::~MainWindow()
   Settings::Instance().ResetNetPlayServer();
 
 #ifdef USE_RETRO_ACHIEVEMENTS
-  AchievementManager::GetInstance()->Shutdown();
+  AchievementManager::GetInstance().Shutdown();
 #endif  // USE_RETRO_ACHIEVEMENTS
 
   delete m_render_widget;
@@ -449,6 +457,7 @@ void MainWindow::CreateComponents()
   m_breakpoint_widget = new BreakpointWidget(this);
   m_code_widget = new CodeWidget(this);
   m_cheats_manager = new CheatsManager(this);
+  m_assembler_widget = new AssemblerWidget(this);
 
   const auto request_watch = [this](QString name, u32 addr) {
     m_watch_widget->AddWatch(name, addr);
@@ -637,8 +646,9 @@ void MainWindow::ConnectHotkeys()
   connect(m_hotkey_scheduler, &HotkeyScheduler::ConnectWiiRemote, this,
           &MainWindow::OnConnectWiiRemote);
   connect(m_hotkey_scheduler, &HotkeyScheduler::ToggleReadOnlyMode, [this] {
-    bool read_only = !Movie::IsReadOnly();
-    Movie::SetReadOnly(read_only);
+    auto& movie = Core::System::GetInstance().GetMovie();
+    bool read_only = !movie.IsReadOnly();
+    movie.SetReadOnly(read_only);
     emit ReadOnlyModeChanged(read_only);
   });
 
@@ -740,6 +750,7 @@ void MainWindow::ConnectStack()
   addDockWidget(Qt::LeftDockWidgetArea, m_memory_widget);
   addDockWidget(Qt::LeftDockWidgetArea, m_network_widget);
   addDockWidget(Qt::LeftDockWidgetArea, m_jit_widget);
+  addDockWidget(Qt::LeftDockWidgetArea, m_assembler_widget);
 
   tabifyDockWidget(m_log_widget, m_log_config_widget);
   tabifyDockWidget(m_log_widget, m_code_widget);
@@ -750,6 +761,7 @@ void MainWindow::ConnectStack()
   tabifyDockWidget(m_log_widget, m_memory_widget);
   tabifyDockWidget(m_log_widget, m_network_widget);
   tabifyDockWidget(m_log_widget, m_jit_widget);
+  tabifyDockWidget(m_log_widget, m_assembler_widget);
 }
 
 void MainWindow::RefreshGameList()
@@ -872,7 +884,16 @@ void MainWindow::OnStopComplete()
   SetFullScreenResolution(false);
 
   if (m_exit_requested || Settings::Instance().IsBatchModeEnabled())
-    QGuiApplication::exit(0);
+  {
+    if (m_assembler_widget->ApplicationCloseRequest())
+    {
+      QGuiApplication::exit(0);
+    }
+    else
+    {
+      m_exit_requested = false;
+    }
+  }
 
   // If the current emulation prevented the booting of another, do that now
   if (m_pending_boot != nullptr)
@@ -991,9 +1012,10 @@ void MainWindow::ForceStop()
 
 void MainWindow::Reset()
 {
-  if (Movie::IsRecordingInput())
-    Movie::SetReset(true);
   auto& system = Core::System::GetInstance();
+  auto& movie = system.GetMovie();
+  if (movie.IsRecordingInput())
+    movie.SetReset(true);
   system.GetProcessorInterface().ResetButton_Tap();
 }
 
@@ -1239,6 +1261,11 @@ void MainWindow::ShowFreeLookWindow()
   {
     m_freelook_window = new FreeLookWindow(this);
     InstallHotkeyFilter(m_freelook_window);
+
+#ifdef USE_RETRO_ACHIEVEMENTS
+    connect(m_freelook_window, &FreeLookWindow::OpenAchievementSettings, this,
+            &MainWindow::ShowAchievementSettings);
+#endif  // USE_RETRO_ACHIEVEMENTS
   }
 
   SetQWidgetWindowDecorations(m_freelook_window);
@@ -1338,7 +1365,8 @@ void MainWindow::ShowFIFOPlayer()
 {
   if (!m_fifo_window)
   {
-    m_fifo_window = new FIFOPlayerWindow;
+    m_fifo_window = new FIFOPlayerWindow(Core::System::GetInstance().GetFifoPlayer(),
+                                         Core::System::GetInstance().GetFifoRecorder());
     connect(m_fifo_window, &FIFOPlayerWindow::LoadFIFORequested, this,
             [this](const QString& path) { StartGame(path, ScanForSecondDisc::No); });
   }
@@ -1591,14 +1619,16 @@ bool MainWindow::NetPlayHost(const UICommon::GameFile& game)
 
   const std::string traversal_host = Config::Get(Config::NETPLAY_TRAVERSAL_SERVER);
   const u16 traversal_port = Config::Get(Config::NETPLAY_TRAVERSAL_PORT);
+  const u16 traversal_port_alt = Config::Get(Config::NETPLAY_TRAVERSAL_PORT_ALT);
 
   if (is_traversal)
     host_port = Config::Get(Config::NETPLAY_LISTEN_PORT);
 
   // Create Server
-  Settings::Instance().ResetNetPlayServer(new NetPlay::NetPlayServer(
-      host_port, use_upnp, m_netplay_dialog,
-      NetPlay::NetTraversalConfig{is_traversal, traversal_host, traversal_port}));
+  Settings::Instance().ResetNetPlayServer(
+      new NetPlay::NetPlayServer(host_port, use_upnp, m_netplay_dialog,
+                                 NetPlay::NetTraversalConfig{is_traversal, traversal_host,
+                                                             traversal_port, traversal_port_alt}));
 
   if (!Settings::Instance().GetNetPlayServer()->is_connected)
   {
@@ -1825,15 +1855,16 @@ void MainWindow::OnPlayRecording()
   if (dtm_file.isEmpty())
     return;
 
-  if (!Movie::IsReadOnly())
+  auto& movie = Core::System::GetInstance().GetMovie();
+  if (!movie.IsReadOnly())
   {
     // let's make the read-only flag consistent at the start of a movie.
-    Movie::SetReadOnly(true);
+    movie.SetReadOnly(true);
     emit ReadOnlyModeChanged(true);
   }
 
   std::optional<std::string> savestate_path;
-  if (Movie::PlayInput(dtm_file.toStdString(), &savestate_path))
+  if (movie.PlayInput(dtm_file.toStdString(), &savestate_path))
   {
     emit RecordingStatusChanged(true);
 
@@ -1843,14 +1874,17 @@ void MainWindow::OnPlayRecording()
 
 void MainWindow::OnStartRecording()
 {
-  if ((!Core::IsRunningAndStarted() && Core::IsRunning()) || Movie::IsRecordingInput() ||
-      Movie::IsPlayingInput())
+  auto& movie = Core::System::GetInstance().GetMovie();
+  if ((!Core::IsRunningAndStarted() && Core::IsRunning()) || movie.IsRecordingInput() ||
+      movie.IsPlayingInput())
+  {
     return;
+  }
 
-  if (Movie::IsReadOnly())
+  if (movie.IsReadOnly())
   {
     // The user just chose to record a movie, so that should take precedence
-    Movie::SetReadOnly(false);
+    movie.SetReadOnly(false);
     emit ReadOnlyModeChanged(true);
   }
 
@@ -1869,7 +1903,7 @@ void MainWindow::OnStartRecording()
     wiimotes[i] = Config::Get(Config::GetInfoForWiimoteSource(i)) != WiimoteSource::None;
   }
 
-  if (Movie::BeginRecordingInput(controllers, wiimotes))
+  if (movie.BeginRecordingInput(controllers, wiimotes))
   {
     emit RecordingStatusChanged(true);
 
@@ -1880,10 +1914,11 @@ void MainWindow::OnStartRecording()
 
 void MainWindow::OnStopRecording()
 {
-  if (Movie::IsRecordingInput())
+  auto& movie = Core::System::GetInstance().GetMovie();
+  if (movie.IsRecordingInput())
     OnExportRecording();
-  if (Movie::IsMovieActive())
-    Movie::EndPlayInput(false);
+  if (movie.IsMovieActive())
+    movie.EndPlayInput(false);
   emit RecordingStatusChanged(false);
 }
 
@@ -1893,7 +1928,7 @@ void MainWindow::OnExportRecording()
     QString dtm_file = DolphinFileDialog::getSaveFileName(
         this, tr("Save Recording File As"), QString(), tr("Dolphin TAS Movies (*.dtm)"));
     if (!dtm_file.isEmpty())
-      Movie::SaveRecording(dtm_file.toStdString());
+      Core::System::GetInstance().GetMovie().SaveRecording(dtm_file.toStdString());
   });
 }
 
@@ -1969,6 +2004,12 @@ void MainWindow::ShowAchievementsWindow()
   m_achievements_window->raise();
   m_achievements_window->activateWindow();
 }
+
+void MainWindow::ShowAchievementSettings()
+{
+  ShowAchievementsWindow();
+  m_achievements_window->ForceSettingsTab();
+}
 #endif  // USE_RETRO_ACHIEVEMENTS
 
 void MainWindow::ShowMemcardManager()
@@ -2009,6 +2050,12 @@ void MainWindow::ShowRiivolutionBootWidget(const UICommon::GameFile& game)
   RiivolutionBootWidget w(disc.volume->GetGameID(), disc.volume->GetRevision(),
                           disc.volume->GetDiscNumber(), game.GetFilePath(), this);
   SetQWidgetWindowDecorations(&w);
+
+#ifdef USE_RETRO_ACHIEVEMENTS
+  connect(&w, &RiivolutionBootWidget::OpenAchievementSettings, this,
+          &MainWindow::ShowAchievementSettings);
+#endif  // USE_RETRO_ACHIEVEMENTS
+
   w.exec();
   if (!w.ShouldBoot())
     return;

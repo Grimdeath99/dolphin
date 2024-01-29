@@ -7,10 +7,12 @@
 
 #include "Common/HookableEvent.h"
 #include "VideoCommon/GraphicsModEditor/Controls/MaterialControl.h"
+#include "VideoCommon/GraphicsModEditor/Controls/MeshControl.h"
 #include "VideoCommon/GraphicsModEditor/Controls/ShaderControl.h"
 #include "VideoCommon/GraphicsModEditor/Controls/TextureControl.h"
 #include "VideoCommon/GraphicsModEditor/EditorState.h"
 #include "VideoCommon/GraphicsModEditor/EditorTypes.h"
+#include "VideoCommon/GraphicsModSystem/Types.h"
 
 namespace GraphicsModEditor::Panels
 {
@@ -23,8 +25,9 @@ public:
   void DrawImGui();
 
 private:
-  void DrawCallIDSelected(const DrawCallID& selected_object);
+  void DrawCallIDSelected(const GraphicsMods::DrawCallID& selected_object);
   void FBCallIDSelected(const FBInfo& selected_object);
+  void LightSelected(const GraphicsMods::LightID& selected_object);
   void AssetDataSelected(EditorAsset* selected_object);
   void SelectionOccurred(const std::set<SelectableType>& selection);
 
@@ -37,5 +40,6 @@ private:
   Controls::MaterialControl m_material_control;
   Controls::ShaderControl m_shader_control;
   Controls::TextureControl m_texture_control;
+  Controls::MeshControl m_mesh_control;
 };
 }  // namespace GraphicsModEditor::Panels

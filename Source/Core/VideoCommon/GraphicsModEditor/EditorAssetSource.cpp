@@ -11,6 +11,7 @@
 #include <picojson.h>
 
 #include "Common/FileUtil.h"
+#include "Common/IOFile.h"
 #include "Common/StringUtil.h"
 #include "Common/VariantUtil.h"
 #include "Core/System.h"
@@ -189,6 +190,57 @@ EditorAssetSource::LoadInfo EditorAssetSource::LoadMaterial(const AssetID& asset
   return {};
 }
 
+EditorAssetSource::LoadInfo EditorAssetSource::LoadMesh(const AssetID& asset_id,
+                                                        VideoCommon::MeshData* data)
+{
+  std::filesystem::path mesh_path;
+  {
+    std::lock_guard lk(m_asset_lock);
+    const auto asset = GetAssetFromID(asset_id);
+    if (!asset)
+    {
+      ERROR_LOG_FMT(VIDEO, "Asset with id '{}' not found!", asset_id);
+      return {};
+    }
+
+    if (const auto it = asset->m_asset_map.find("mesh"); it != asset->m_asset_map.end())
+    {
+      mesh_path = it->second;
+    }
+    else
+    {
+      ERROR_LOG_FMT(VIDEO, "Asset '{}' error - could not find 'mesh' in asset map!", asset_id);
+      return {};
+    }
+    if (auto mesh_data = std::get_if<std::unique_ptr<VideoCommon::MeshData>>(&asset->m_data))
+    {
+      data->m_mesh_material_to_material_asset_id =
+          mesh_data->get()->m_mesh_material_to_material_asset_id;
+    }
+  }
+
+  auto ext = PathToString(mesh_path.extension());
+  Common::ToLower(&ext);
+  if (ext == ".dolmesh")
+  {
+    File::IOFile file(PathToString(mesh_path), "rb");
+    std::vector<u8> bytes;
+    bytes.reserve(file.GetSize());
+    file.ReadBytes(bytes.data(), file.GetSize());
+    if (!VideoCommon::MeshData::FromDolphinMesh(bytes, data))
+    {
+      ERROR_LOG_FMT(VIDEO, "Asset '{}' error -  failed to load the mesh file '{}',", asset_id,
+                    PathToString(mesh_path));
+      return {};
+    }
+
+    // SetAssetPreviewData(asset_id, data->m_texture);
+    return LoadInfo{1, GetLastAssetWriteTime(asset_id)};
+  }
+
+  return {};
+}
+
 EditorAssetSource::TimeType EditorAssetSource::GetLastAssetWriteTime(const AssetID& asset_id) const
 {
   std::lock_guard lk(m_asset_lock);
@@ -249,6 +301,7 @@ void EditorAssetSource::AddAsset(const std::filesystem::path& asset_path, AssetI
 {
   std::lock_guard lk(m_asset_lock);
   EditorAsset asset;
+  asset.m_valid = true;
   bool add = false;
   const std::string filename = PathToString(asset_path.filename());
   auto ext = PathToString(asset_path.extension());
@@ -310,6 +363,33 @@ void EditorAssetSource::AddAsset(const std::filesystem::path& asset_path, AssetI
           }
         }
       }
+    }
+  }
+  else if (ext == ".dolmesh")
+  {
+    auto mesh_data = std::make_unique<VideoCommon::MeshData>();
+
+    // Only valid if metadata file exists
+    const auto root = asset_path.parent_path();
+    const auto name = asset_path.stem();
+    const auto extension = asset_path.extension();
+    auto result = root / name;
+    result += ".metadata";
+    if (std::filesystem::exists(result))
+    {
+      if (auto json = GetJsonObjectFromFile(result))
+      {
+        std::string metadata;
+        if (File::ReadFileToString(PathToString(asset_path), metadata))
+        {
+          VideoCommon::MeshData::FromJson(uuid, *json, mesh_data.get());
+          add = true;
+          asset.m_data = std::move(mesh_data);
+          asset.m_data_type = Mesh;
+          asset.m_asset_map["mesh"] = asset_path;
+        }
+      }
+      asset.m_asset_map["metadata"] = result;
     }
   }
   else if (ext == ".material")
@@ -389,6 +469,24 @@ bool EditorAssetSource::RenameAsset(const std::filesystem::path& old_path,
       extracted_entry.mapped().m_asset_map["metadata"] = new_result;
     }
     extracted_entry.mapped().m_asset_map["texture"] = new_path;
+  }
+  else if (ext == ".gltf")
+  {
+    const auto old_root = old_path.parent_path();
+    const auto old_name = old_path.stem();
+    auto old_result = old_root / old_name;
+    old_result += ".metadata";
+    if (std::filesystem::exists(old_result))
+    {
+      const auto new_root = new_path.parent_path();
+      const auto new_name = new_path.stem();
+      auto new_result = new_root / new_name;
+      new_result += ".metadata";
+      std::filesystem::rename(old_result, new_result);
+
+      extracted_entry.mapped().m_asset_map["metadata"] = new_result;
+    }
+    extracted_entry.mapped().m_asset_map["mesh"] = new_path;
   }
   else if (ext == ".glsl")
   {
@@ -488,7 +586,7 @@ void EditorAssetSource::SaveAssetDataAsFiles() const
                          metadata_it != asset.m_asset_map.end())
                      {
                        picojson::object serialized_root;
-                       VideoCommon::PixelShaderData::ToJson(&serialized_root, *pixel_shader_data);
+                       VideoCommon::PixelShaderData::ToJson(serialized_root, *pixel_shader_data);
                        save_json_to_file(PathToString(metadata_it->second), serialized_root);
                      }
                    },
@@ -498,6 +596,15 @@ void EditorAssetSource::SaveAssetDataAsFiles() const
                      {
                        picojson::object serialized_root;
                        VideoCommon::TextureData::ToJson(&serialized_root, *texture_data);
+                       save_json_to_file(PathToString(metadata_it->second), serialized_root);
+                     }
+                   },
+                   [&](const std::unique_ptr<VideoCommon::MeshData>& mesh_data) {
+                     if (const auto metadata_it = asset.m_asset_map.find("metadata");
+                         metadata_it != asset.m_asset_map.end())
+                     {
+                       picojson::object serialized_root;
+                       VideoCommon::MeshData::ToJson(&serialized_root, *mesh_data);
                        save_json_to_file(PathToString(metadata_it->second), serialized_root);
                      }
                    }},
@@ -526,8 +633,9 @@ AbstractTexture* EditorAssetSource::GetAssetPreview(const AssetID& asset_id)
         return nullptr;
 
       auto& first_level = first_slice.m_levels[0];
-      it->second.m_preview_texture = g_gfx->CreateTexture(TextureConfig{
-          first_level.width, first_level.height, 1, 1, 1, AbstractTextureFormat::RGBA8, 0});
+      it->second.m_preview_texture = g_gfx->CreateTexture(
+          TextureConfig{first_level.width, first_level.height, 1, 1, 1,
+                        AbstractTextureFormat::RGBA8, 0, AbstractTextureType::Texture_2DArray});
 
       it->second.m_preview_texture->Load(0, first_level.width, first_level.height,
                                          first_level.row_length, first_level.data.data(),

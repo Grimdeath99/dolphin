@@ -15,11 +15,19 @@
 #include "VideoCommon/ShaderCache.h"
 #include "VideoCommon/VideoEvents.h"
 
+struct CustomPixelShaderContents;
 class CustomShaderCache;
 class DataReader;
+class GeometryShaderManager;
 class NativeVertexFormat;
+class PixelShaderManager;
 class PointerWrap;
 struct PortableVertexDeclaration;
+
+namespace GraphicsModActionData
+{
+struct MeshChunk;
+}
 
 struct Slope
 {
@@ -194,6 +202,7 @@ protected:
   u8* m_cur_buffer_pointer = nullptr;
   u8* m_base_buffer_pointer = nullptr;
   u8* m_end_buffer_pointer = nullptr;
+  u8* m_last_reset_pointer = nullptr;
 
   // Alternative buffers in CPU memory for primitives we are going to discard.
   std::vector<u8> m_cpu_vertex_buffer;
@@ -218,8 +227,27 @@ private:
   // Minimum number of draws per command buffer when attempting to preempt a readback operation.
   static constexpr u32 MINIMUM_DRAW_CALLS_PER_COMMAND_BUFFER_FOR_READBACK = 10;
 
+  void RenderDrawCall(PixelShaderManager& pixel_shader_manager,
+                      GeometryShaderManager& geometry_shader_manager,
+                      const CustomPixelShaderContents& custom_pixel_shader_contents,
+                      std::span<u8> custom_pixel_shader_uniforms,
+                      const std::optional<GraphicsModActionData::MeshChunk>& mesh_chunk,
+                      PrimitiveType primitive_type, const AbstractPipeline* current_pipeline);
   void UpdatePipelineConfig();
   void UpdatePipelineObject();
+
+  static VideoCommon::GXPipelineUid
+  GetPipelineState(const GraphicsModActionData::MeshChunk& mesh_chunk);
+  static VideoCommon::GXUberPipelineUid
+  GetUberPipelineState(const GraphicsModActionData::MeshChunk& mesh_chunk);
+  const AbstractPipeline*
+  GetCustomPipeline(const CustomPixelShaderContents& custom_pixel_shader_contents,
+                    const VideoCommon::GXPipelineUid& current_pipeline_config,
+                    const VideoCommon::GXUberPipelineUid& current_uber_pipeline_confi,
+                    const AbstractPipeline* current_pipeline) const;
+
+  bool IsDrawSkinned(NativeVertexFormat* format) const;
+  std::array<float, 4> GetLastWorldspacePosition(NativeVertexFormat* format) const;
 
   bool m_is_flushed = true;
   FlushStatistics m_flush_statistics = {};
@@ -234,6 +262,11 @@ private:
 
   std::unique_ptr<CustomShaderCache> m_custom_shader_cache;
   u64 m_ticks_elapsed;
+
+  // Since Core includes VertexManagerBase and also uses an older xxhash
+  // due to lz4, we need to hide away the hash details inside an impl
+  struct HashStateImpl;
+  std::unique_ptr<HashStateImpl> m_hash_state_impl;
 
   Common::EventHook m_frame_end_event;
   Common::EventHook m_after_present_event;

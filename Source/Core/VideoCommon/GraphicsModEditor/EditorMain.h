@@ -8,6 +8,8 @@
 #include <string_view>
 
 #include "Common/HookableEvent.h"
+#include "VideoCommon/GraphicsModEditor/SceneDumper.h"
+#include "VideoCommon/GraphicsModSystem/Types.h"
 #include "VideoCommon/XFMemory.h"
 
 struct FBInfo;
@@ -17,7 +19,9 @@ namespace GraphicsModEditor
 {
 struct DrawCallData;
 struct FBCallData;
+struct LightData;
 struct EditorState;
+
 namespace Panels
 {
 class ActiveTargetsPanel;
@@ -34,6 +38,7 @@ public:
   void Shutdown();
 
   bool IsEnabled() const { return m_enabled; }
+  SceneDumper* GetSceneDumper() const;
 
   // Creates a new graphics mod for editing
   bool NewMod(std::string_view name, std::string_view author, std::string_view description);
@@ -47,6 +52,7 @@ public:
 
   void AddDrawCall(DrawCallData draw_call);
   void AddFBCall(FBCallData fb_call);
+  void AddLightData(LightData light_data);
 
   // TODO: move...
   const std::vector<GraphicsModAction*>& GetProjectionActions(ProjectionType projection_type) const;
@@ -54,12 +60,13 @@ public:
   GetProjectionTextureActions(ProjectionType projection_type,
                               const std::string& texture_name) const;
   const std::vector<GraphicsModAction*>&
-  GetDrawStartedActions(const std::string& texture_name) const;
+  GetDrawStartedActions(GraphicsMods::DrawCallID draw_call_id) const;
   const std::vector<GraphicsModAction*>&
   GetTextureLoadActions(const std::string& texture_name) const;
   const std::vector<GraphicsModAction*>&
   GetTextureCreateActions(const std::string& texture_name) const;
   const std::vector<GraphicsModAction*>& GetEFBActions(const FBInfo& efb) const;
+  const std::vector<GraphicsModAction*>& GetLightActions(GraphicsMods::LightID light_Id) const;
 
   EditorState* GetEditorState() const;
 
@@ -76,7 +83,6 @@ private:
   // Closes this editor session
   void Close();
 
-  // Data to serialize
   void OnChangeOccured();
   Common::EventHook m_change_occurred_event;
   bool m_has_changes = false;
@@ -96,5 +102,8 @@ private:
   std::string m_editor_new_mod_name;
   std::string m_editor_new_mod_author;
   std::string m_editor_new_mod_description;
+
+  SceneDumper::RecordingRequest m_last_mesh_dump_request;
+  bool m_open_mesh_dump_export_window = false;
 };
 }  // namespace GraphicsModEditor

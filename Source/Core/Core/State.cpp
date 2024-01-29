@@ -31,6 +31,8 @@
 #include "Common/Version.h"
 #include "Common/WorkQueueThread.h"
 
+#include "Core/AchievementManager.h"
+#include "Core/Config/AchievementSettings.h"
 #include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/CoreTiming.h"
@@ -93,7 +95,7 @@ static size_t s_state_writes_in_queue;
 static std::condition_variable s_state_write_queue_is_empty;
 
 // Don't forget to increase this after doing changes on the savestate system
-constexpr u32 STATE_VERSION = 163;  // Last changed in PR 12217
+constexpr u32 STATE_VERSION = 167;  // Last changed in PR 12494
 
 // Increase this if the StateExtendedHeader definition changes
 constexpr u32 EXTENDED_HEADER_VERSION = 1;  // Last changed in PR 12217
@@ -169,7 +171,7 @@ static void DoState(PointerWrap& p)
 
   // Movie must be done before the video backend, because the window is redrawn in the video backend
   // state load, and the frame number must be up-to-date.
-  Movie::DoState(p);
+  system.GetMovie().DoState(p);
   p.DoMarker("Movie");
 
   // Begin with video backend, so that it gets a chance to clear its caches and writeback modified
@@ -203,6 +205,14 @@ void LoadFromBuffer(std::vector<u8>& buffer)
     OSD::AddMessage("Loading savestates is disabled in Netplay to prevent desyncs");
     return;
   }
+
+#ifdef USE_RETRO_ACHIEVEMENTS
+  if (AchievementManager::GetInstance().IsHardcoreModeActive())
+  {
+    OSD::AddMessage("Loading savestates is disabled in RetroAchievements hardcore mode");
+    return;
+  }
+#endif  // USE_RETRO_ACHIEVEMENTS
 
   Core::RunOnCPUThread(
       [&] {
@@ -433,9 +443,10 @@ static void CompressAndDumpState(CompressAndDumpState_args& save_args)
       }
     }
 
-    if ((Movie::IsMovieActive()) && !Movie::IsJustStartingRecordingInputFromSaveState())
-      Movie::SaveRecording(dtmname);
-    else if (!Movie::IsMovieActive())
+    auto& movie = Core::System::GetInstance().GetMovie();
+    if ((movie.IsMovieActive()) && !movie.IsJustStartingRecordingInputFromSaveState())
+      movie.SaveRecording(dtmname);
+    else if (!movie.IsMovieActive())
       File::Delete(dtmname);
 
     // Move written state to final location.
@@ -842,6 +853,14 @@ void LoadAs(const std::string& filename)
     return;
   }
 
+#ifdef USE_RETRO_ACHIEVEMENTS
+  if (AchievementManager::GetInstance().IsHardcoreModeActive())
+  {
+    OSD::AddMessage("Loading savestates is disabled in RetroAchievements hardcore mode");
+    return;
+  }
+#endif  // USE_RETRO_ACHIEVEMENTS
+
   std::unique_lock lk(s_load_or_save_in_progress_mutex, std::try_to_lock);
   if (!lk)
     return;
@@ -849,13 +868,14 @@ void LoadAs(const std::string& filename)
   Core::RunOnCPUThread(
       [&] {
         // Save temp buffer for undo load state
-        if (!Movie::IsJustStartingRecordingInputFromSaveState())
+        auto& movie = Core::System::GetInstance().GetMovie();
+        if (!movie.IsJustStartingRecordingInputFromSaveState())
         {
           std::lock_guard lk2(s_undo_load_buffer_mutex);
           SaveToBuffer(s_undo_load_buffer);
           const std::string dtmpath = File::GetUserPath(D_STATESAVES_IDX) + "undo.dtm";
-          if (Movie::IsMovieActive())
-            Movie::SaveRecording(dtmpath);
+          if (movie.IsMovieActive())
+            movie.SaveRecording(dtmpath);
           else if (File::Exists(dtmpath))
             File::Delete(dtmpath);
         }
@@ -886,10 +906,10 @@ void LoadAs(const std::string& filename)
             Core::DisplayMessage(
                 fmt::format("Loaded State from {}", tempfilename.filename().string()), 2000);
             if (File::Exists(filename + ".dtm"))
-              Movie::LoadInput(filename + ".dtm");
-            else if (!Movie::IsJustStartingRecordingInputFromSaveState() &&
-                     !Movie::IsJustStartingPlayingInputFromSaveState())
-              Movie::EndPlayInput(false);
+              movie.LoadInput(filename + ".dtm");
+            else if (!movie.IsJustStartingRecordingInputFromSaveState() &&
+                     !movie.IsJustStartingPlayingInputFromSaveState())
+              movie.EndPlayInput(false);
           }
           else
           {
@@ -997,13 +1017,14 @@ void UndoLoadState()
   std::lock_guard lk(s_undo_load_buffer_mutex);
   if (!s_undo_load_buffer.empty())
   {
-    if (Movie::IsMovieActive())
+    auto& movie = Core::System::GetInstance().GetMovie();
+    if (movie.IsMovieActive())
     {
       const std::string dtmpath = File::GetUserPath(D_STATESAVES_IDX) + "undo.dtm";
       if (File::Exists(dtmpath))
       {
         LoadFromBuffer(s_undo_load_buffer);
-        Movie::LoadInput(dtmpath);
+        movie.LoadInput(dtmpath);
       }
       else
       {

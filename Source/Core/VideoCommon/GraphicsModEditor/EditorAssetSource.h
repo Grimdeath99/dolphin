@@ -16,6 +16,7 @@
 
 #include "VideoCommon/Assets/CustomAssetLibrary.h"
 #include "VideoCommon/Assets/MaterialAsset.h"
+#include "VideoCommon/Assets/MeshAsset.h"
 #include "VideoCommon/Assets/ShaderAsset.h"
 #include "VideoCommon/Assets/TextureAsset.h"
 #include "VideoCommon/GraphicsModEditor/EditorTypes.h"
@@ -37,6 +38,7 @@ public:
   LoadInfo LoadTexture(const AssetID& asset_id, VideoCommon::TextureData* data) override;
   LoadInfo LoadPixelShader(const AssetID& asset_id, VideoCommon::PixelShaderData* data) override;
   LoadInfo LoadMaterial(const AssetID& asset_id, VideoCommon::MaterialData* data) override;
+  LoadInfo LoadMesh(const AssetID& asset_id, VideoCommon::MeshData* data) override;
   TimeType GetLastAssetWriteTime(const AssetID& asset_id) const override;
 
   // Editor interface

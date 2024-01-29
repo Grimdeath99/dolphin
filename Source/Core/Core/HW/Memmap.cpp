@@ -51,7 +51,7 @@ void MemoryManager::InitMMIO(bool is_wii)
 {
   m_mmio_mapping = std::make_unique<MMIO::Mapping>();
 
-  m_system.GetCommandProcessor().RegisterMMIO(m_system, m_mmio_mapping.get(), 0x0C000000);
+  m_system.GetCommandProcessor().RegisterMMIO(m_mmio_mapping.get(), 0x0C000000);
   m_system.GetPixelEngine().RegisterMMIO(m_mmio_mapping.get(), 0x0C001000);
   m_system.GetVideoInterface().RegisterMMIO(m_mmio_mapping.get(), 0x0C002000);
   m_system.GetProcessorInterface().RegisterMMIO(m_mmio_mapping.get(), 0x0C003000);
@@ -63,7 +63,7 @@ void MemoryManager::InitMMIO(bool is_wii)
   m_system.GetAudioInterface().RegisterMMIO(m_mmio_mapping.get(), 0x0C006C00);
   if (is_wii)
   {
-    IOS::RegisterMMIO(m_mmio_mapping.get(), 0x0D000000);
+    m_system.GetWiiIPC().RegisterMMIO(m_mmio_mapping.get(), 0x0D000000);
     m_system.GetDVDInterface().RegisterMMIO(m_mmio_mapping.get(), 0x0D006000, true);
     m_system.GetSerialInterface().RegisterMMIO(m_mmio_mapping.get(), 0x0D006400);
     m_system.GetExpansionInterface().RegisterMMIO(m_mmio_mapping.get(), 0x0D006800);

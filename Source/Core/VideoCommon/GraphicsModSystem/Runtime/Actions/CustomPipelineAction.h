@@ -5,18 +5,13 @@
 
 #include <memory>
 #include <string>
-#include <string_view>
 #include <vector>
 
 #include <picojson.h>
 
-#include "VideoCommon/AbstractTexture.h"
 #include "VideoCommon/Assets/CustomAssetLibrary.h"
-#include "VideoCommon/Assets/MaterialAsset.h"
-#include "VideoCommon/Assets/ShaderAsset.h"
-#include "VideoCommon/Assets/TextureAsset.h"
+#include "VideoCommon/GraphicsModSystem/Runtime/CustomPipeline.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModAction.h"
-#include "VideoCommon/ShaderGenCommon.h"
 
 class CustomPipelineAction final : public GraphicsModAction
 {
@@ -35,9 +30,7 @@ public:
   CustomPipelineAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library,
                        std::vector<PipelinePassPassDescription> pass_descriptions);
   ~CustomPipelineAction();
-  void OnTextureLoad(GraphicsModActionData::TextureLoad*) override;
   void OnDrawStarted(GraphicsModActionData::DrawStarted*) override;
-  void OnTextureCreate(GraphicsModActionData::TextureCreate*) override;
 
   void DrawImGui() override;
   void SerializeToConfig(picojson::object* obj) override;
@@ -46,21 +39,5 @@ public:
 private:
   std::shared_ptr<VideoCommon::CustomAssetLibrary> m_library;
   std::vector<PipelinePassPassDescription> m_passes_config;
-  struct PipelinePass
-  {
-    VideoCommon::CachedAsset<VideoCommon::MaterialAsset> m_pixel_material;
-    VideoCommon::CachedAsset<VideoCommon::PixelShaderAsset> m_pixel_shader;
-    std::vector<VideoCommon::CachedAsset<VideoCommon::GameTextureAsset>> m_game_textures;
-    std::vector<VideoCommon::CachedAsset<VideoCommon::GameTextureAsset>> m_additional_textures;
-  };
-  std::vector<PipelinePass> m_passes;
-
-  ShaderCode m_last_generated_shader_code;
-  ShaderCode m_last_generated_material_code;
-
-  bool m_valid = true;
-  bool m_trigger_texture_reload = true;
-
-  std::vector<std::string> m_texture_code_names;
-  std::vector<u8> m_material_data;
+  std::vector<CustomPipeline> m_pipeline_passes;
 };

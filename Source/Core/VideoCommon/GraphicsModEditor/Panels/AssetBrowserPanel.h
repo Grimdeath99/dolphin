@@ -9,7 +9,6 @@
 
 #include <imgui.h>
 
-#include "Common/HookableEvent.h"
 #include "VideoCommon/Assets/CustomAssetLibrary.h"
 #include "VideoCommon/GraphicsModEditor/EditorState.h"
 
@@ -38,14 +37,18 @@ private:
                    std::string rename_text);
   void EndRename();
   EditorState& m_state;
-  Common::EventHook m_selection_event;
 
   std::filesystem::path m_current_path;
 
   // Rename
   std::optional<VideoCommon::CustomAssetLibrary::AssetID> m_renamed_asset_id = std::nullopt;
-  std::string m_rename_text = "";
+  std::string m_rename_text;
   bool m_is_rename_focused = false;
   bool m_does_rename_have_error = false;
+
+  // Import mesh
+  bool m_is_mesh_import_active = false;
+  bool m_mesh_import_import_materials = false;
+  std::string m_mesh_import_filename;
 };
 }  // namespace GraphicsModEditor::Panels

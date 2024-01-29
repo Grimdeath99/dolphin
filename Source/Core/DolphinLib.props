@@ -16,6 +16,13 @@
     <ClInclude Include="Common\Align.h" />
     <ClInclude Include="Common\Analytics.h" />
     <ClInclude Include="Common\Assert.h" />
+    <ClInclude Include="Common\Assembler\AssemblerShared.h" />
+    <ClInclude Include="Common\Assembler\AssemblerTables.h" />
+    <ClInclude Include="Common\Assembler\CaseInsensitiveDict.h" />
+    <ClInclude Include="Common\Assembler\GekkoAssembler.h" />
+    <ClInclude Include="Common\Assembler\GekkoIRGen.h" />
+    <ClInclude Include="Common\Assembler\GekkoLexer.h" />
+    <ClInclude Include="Common\Assembler\GekkoParser.h" />
     <ClInclude Include="Common\BitField.h" />
     <ClInclude Include="Common\BitSet.h" />
     <ClInclude Include="Common\BitUtils.h" />
@@ -118,6 +125,7 @@
     <ClInclude Include="Common\Intrinsics.h" />
     <ClInclude Include="Common\IOFile.h" />
     <ClInclude Include="Common\JitRegister.h" />
+    <ClInclude Include="Common\JsonUtil.h" />
     <ClInclude Include="Common\Lazy.h" />
     <ClInclude Include="Common\LdrWatcher.h" />
     <ClInclude Include="Common\LinearDiskCache.h" />
@@ -366,6 +374,7 @@
     <ClInclude Include="Core\IOS\Network\KD\VFF\VFFUtil.h" />
     <ClInclude Include="Core\IOS\Network\KD\WC24File.h" />
     <ClInclude Include="Core\IOS\Network\KD\Mail\MailCommon.h" />
+    <ClInclude Include="Core\IOS\Network\KD\Mail\WC24FriendList.h" />
     <ClInclude Include="Core\IOS\Network\KD\Mail\WC24Send.h" />
     <ClInclude Include="Core\IOS\Network\MACUtils.h" />
     <ClInclude Include="Core\IOS\Network\NCD\Manage.h" />
@@ -647,6 +656,7 @@
     <ClInclude Include="VideoCommon\Assets\CustomTextureData.h" />
     <ClInclude Include="VideoCommon\Assets\DirectFilesystemAssetLibrary.h" />
     <ClInclude Include="VideoCommon\Assets\MaterialAsset.h" />
+    <ClInclude Include="VideoCommon\Assets\MeshAsset.h" />
     <ClInclude Include="VideoCommon\Assets\ShaderAsset.h" />
     <ClInclude Include="VideoCommon\Assets\TextureAsset.h" />
     <ClInclude Include="VideoCommon\AsyncRequests.h" />
@@ -673,6 +683,9 @@
     <ClInclude Include="VideoCommon\GeometryShaderManager.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\AssetDisplay.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\MaterialControl.h" />
+    <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\MeshControl.h" />
+    <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\MeshExtractWindow.h" />
+    <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\MeshImportWindow.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\ShaderControl.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\TextureControl.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\EditorAssetSource.h" />
@@ -683,6 +696,7 @@
     <ClInclude Include="VideoCommon\GraphicsModEditor\Panels\ActiveTargetsPanel.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\Panels\AssetBrowserPanel.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\Panels\PropertiesPanel.h" />
+    <ClInclude Include="VideoCommon\GraphicsModEditor\SceneDumper.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsMod.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsModAsset.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsModFeature.h" />
@@ -690,11 +704,14 @@
     <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsTarget.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsTargetGroup.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Constants.h" />
+    <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\Actions\CustomMeshAction.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\Actions\CustomPipelineAction.h" />
+    <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\Actions\ModifyLight.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\Actions\MoveAction.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\Actions\PrintAction.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\Actions\ScaleAction.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\Actions\SkipAction.h" />
+    <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\CustomPipeline.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\CustomShaderCache.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\FBInfo.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModAction.h" />
@@ -702,6 +719,7 @@
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModActionFactory.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModGroup.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModManager.h" />
+    <ClInclude Include="VideoCommon\GraphicsModSystem\Types.h" />
     <ClInclude Include="VideoCommon\GXPipelineTypes.h" />
     <ClInclude Include="VideoCommon\HiresTextures.h" />
     <ClInclude Include="VideoCommon\ImageWrite.h" />
@@ -736,6 +754,7 @@
     <ClInclude Include="VideoCommon\TextureDecoder_Util.h" />
     <ClInclude Include="VideoCommon\TextureDecoder.h" />
     <ClInclude Include="VideoCommon\TextureInfo.h" />
+    <ClInclude Include="VideoCommon\TextureUtils.h" />
     <ClInclude Include="VideoCommon\TMEM.h" />
     <ClInclude Include="VideoCommon\UberShaderCommon.h" />
     <ClInclude Include="VideoCommon\UberShaderPixel.h" />
@@ -758,6 +777,7 @@
     <ClInclude Include="VideoCommon\VideoState.h" />
     <ClInclude Include="VideoCommon\Widescreen.h" />
     <ClInclude Include="VideoCommon\XFMemory.h" />
+    <ClInclude Include="VideoCommon\XFStateManager.h" />
     <ClInclude Include="VideoCommon\XFStructs.h" />
   </ItemGroup>
   <ItemGroup>
@@ -772,6 +792,12 @@
     <ClCompile Include="AudioCommon\WASAPIStream.cpp" />
     <ClCompile Include="AudioCommon\WaveFile.cpp" />
     <ClCompile Include="Common\Analytics.cpp" />
+    <ClCompile Include="Common\Assembler\AssemblerShared.cpp" />
+    <ClCompile Include="Common\Assembler\AssemblerTables.cpp" />
+    <ClCompile Include="Common\Assembler\GekkoAssembler.cpp" />
+    <ClCompile Include="Common\Assembler\GekkoIRGen.cpp" />
+    <ClCompile Include="Common\Assembler\GekkoLexer.cpp" />
+    <ClCompile Include="Common\Assembler\GekkoParser.cpp" />
     <ClCompile Include="Common\ColorUtil.cpp" />
     <ClCompile Include="Common\CommonFuncs.cpp" />
     <ClCompile Include="Common\CompatPatches.cpp" />
@@ -1027,6 +1053,7 @@
     <ClCompile Include="Core\IOS\Network\KD\NWC24Config.cpp" />
     <ClCompile Include="Core\IOS\Network\KD\NWC24DL.cpp" />
     <ClCompile Include="Core\IOS\Network\KD\VFF\VFFUtil.cpp" />
+    <ClCompile Include="Core\IOS\Network\KD\Mail\WC24FriendList.cpp" />
     <ClCompile Include="Core\IOS\Network\KD\Mail\WC24Send.cpp" />
     <ClCompile Include="Core\IOS\Network\MACUtils.cpp" />
     <ClCompile Include="Core\IOS\Network\NCD\Manage.cpp" />
@@ -1286,6 +1313,7 @@
     <ClCompile Include="VideoCommon\Assets\CustomTextureData.cpp" />
     <ClCompile Include="VideoCommon\Assets\DirectFilesystemAssetLibrary.cpp" />
     <ClCompile Include="VideoCommon\Assets\MaterialAsset.cpp" />
+    <ClCompile Include="VideoCommon\Assets\MeshAsset.cpp" />
     <ClCompile Include="VideoCommon\Assets\ShaderAsset.cpp" />
     <ClCompile Include="VideoCommon\Assets\TextureAsset.cpp" />
     <ClCompile Include="VideoCommon\AsyncRequests.cpp" />
@@ -1308,6 +1336,9 @@
     <ClCompile Include="VideoCommon\GeometryShaderManager.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\AssetDisplay.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\MaterialControl.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\MeshControl.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\MeshExtractWindow.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\MeshImportWindow.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\ShaderControl.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\TextureControl.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\EditorAssetSource.cpp" />
@@ -1316,17 +1347,21 @@
     <ClCompile Include="VideoCommon\GraphicsModEditor\Panels\ActiveTargetsPanel.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\Panels\AssetBrowserPanel.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\Panels\PropertiesPanel.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModEditor\SceneDumper.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsMod.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsModAsset.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsModFeature.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsModGroup.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsTarget.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsTargetGroup.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\CustomMeshAction.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\CustomPipelineAction.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\ModifyLight.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\MoveAction.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\PrintAction.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\ScaleAction.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\SkipAction.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\CustomPipeline.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\CustomShaderCache.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\FBInfo.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModActionFactory.cpp" />
@@ -1359,6 +1394,7 @@
     <ClCompile Include="VideoCommon\TextureConverterShaderGen.cpp" />
     <ClCompile Include="VideoCommon\TextureDecoder_Common.cpp" />
     <ClCompile Include="VideoCommon\TextureInfo.cpp" />
+    <ClCompile Include="VideoCommon\TextureUtils.cpp" />
     <ClCompile Include="VideoCommon\TMEM.cpp" />
     <ClCompile Include="VideoCommon\UberShaderCommon.cpp" />
     <ClCompile Include="VideoCommon\UberShaderPixel.cpp" />
@@ -1378,6 +1414,7 @@
     <ClCompile Include="VideoCommon\VideoState.cpp" />
     <ClCompile Include="VideoCommon\Widescreen.cpp" />
     <ClCompile Include="VideoCommon\XFMemory.cpp" />
+    <ClCompile Include="VideoCommon\XFStateManager.cpp" />
     <ClCompile Include="VideoCommon\XFStructs.cpp" />
   </ItemGroup>
   <ItemGroup>

@@ -7,11 +7,14 @@
 #include <cmath>
 #include <memory>
 
+#include <xxhash.h>
+
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
 #include "Common/EnumMap.h"
 #include "Common/Logging/Log.h"
 #include "Common/MathUtil.h"
+#include "Common/SmallVector.h"
 
 #include "Core/ConfigManager.h"
 #include "Core/DolphinAnalytics.h"
@@ -26,6 +29,7 @@
 #include "VideoCommon/GeometryShaderManager.h"
 #include "VideoCommon/GraphicsModEditor/EditorMain.h"
 #include "VideoCommon/GraphicsModEditor/EditorTypes.h"
+#include "VideoCommon/GraphicsModEditor/SceneDumper.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/CustomShaderCache.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionData.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h"
@@ -44,6 +48,7 @@
 #include "VideoCommon/VideoCommon.h"
 #include "VideoCommon/VideoConfig.h"
 #include "VideoCommon/XFMemory.h"
+#include "VideoCommon/XFStateManager.h"
 
 std::unique_ptr<VertexManagerBase> g_vertex_manager;
 
@@ -92,8 +97,9 @@ static bool IsAnamorphicProjection(const Projection::Raw& projection, const View
                                    const VideoConfig& config)
 {
   // If ratio between our projection and viewport aspect ratios is similar to 16:9 / 4:3
-  // we have an anamorphic projection. This value can be overridden
-  // by a GameINI.
+  // we have an anamorphic projection. This value can be overridden by a GameINI.
+  // Game cheats that change the aspect ratio to natively unsupported ones
+  // won't be automatically recognized here.
 
   return std::abs(CalculateProjectionViewportRatio(projection, viewport) -
                   config.widescreen_heuristic_widescreen_ratio) <
@@ -108,6 +114,23 @@ static bool IsNormalProjection(const Projection::Raw& projection, const Viewport
          config.widescreen_heuristic_aspect_ratio_slop;
 }
 
+struct VertexManagerBase::HashStateImpl
+{
+  HashStateImpl()
+  {
+    m_graphics_mod_id_hash_state = XXH3_createState();
+    m_graphics_mod_light_hash_state = XXH3_createState();
+  }
+  ~HashStateImpl()
+  {
+    XXH3_freeState(m_graphics_mod_id_hash_state);
+    XXH3_freeState(m_graphics_mod_light_hash_state);
+  }
+  XXH3_state_t* m_graphics_mod_id_hash_state;
+  XXH3_state_t* m_graphics_mod_light_hash_state;
+  static const unsigned long long m_graphics_mod_hash_seed = 1;
+};
+
 VertexManagerBase::VertexManagerBase()
     : m_cpu_vertex_buffer(MAXVBUFFERSIZE), m_cpu_index_buffer(MAXIBUFFERSIZE)
 {
@@ -120,9 +143,13 @@ bool VertexManagerBase::Initialize()
   m_frame_end_event = AfterFrameEvent::Register([this] { OnEndFrame(); }, "VertexManagerBase");
   m_after_present_event = AfterPresentEvent::Register(
       [this](PresentInfo& pi) { m_ticks_elapsed = pi.emulated_timestamp; }, "VertexManagerBase");
-  m_index_generator.Init();
+
+  auto& system = Core::System::GetInstance();
+  auto& editor = system.GetGraphicsModEditor();
+  m_index_generator.Init(editor.IsEnabled());
   m_custom_shader_cache = std::make_unique<CustomShaderCache>();
   m_cpu_cull.Init();
+  m_hash_state_impl = std::make_unique<HashStateImpl>();
   return true;
 }
 
@@ -152,10 +179,13 @@ DataReader VertexManagerBase::PrepareForAdditionalData(OpcodeDecoder::Primitive 
   // The SSE vertex loader can write up to 4 bytes past the end
   u32 const needed_vertex_bytes = count * stride + 4;
 
+  auto& system = Core::System::GetInstance();
+  auto& editor = system.GetGraphicsModEditor();
+  const bool supports_primitive_restart =
+      g_ActiveConfig.backend_info.bSupportsPrimitiveRestart && !editor.IsEnabled();
   // We can't merge different kinds of primitives, so we have to flush here
-  PrimitiveType new_primitive_type = g_ActiveConfig.backend_info.bSupportsPrimitiveRestart ?
-                                         primitive_from_gx_pr[primitive] :
-                                         primitive_from_gx[primitive];
+  PrimitiveType new_primitive_type =
+      supports_primitive_restart ? primitive_from_gx_pr[primitive] : primitive_from_gx[primitive];
   if (m_current_primitive_type != new_primitive_type) [[unlikely]]
   {
     Flush();
@@ -236,9 +266,14 @@ u32 VertexManagerBase::GetRemainingIndices(OpcodeDecoder::Primitive primitive) c
 {
   const u32 index_len = MAXIBUFFERSIZE - m_index_generator.GetIndexLen();
 
+  auto& system = Core::System::GetInstance();
+  auto& editor = system.GetGraphicsModEditor();
+  const bool supports_primitive_restart =
+      g_ActiveConfig.backend_info.bSupportsPrimitiveRestart && !editor.IsEnabled();
+
   if (primitive >= Primitive::GX_DRAW_LINES)
   {
-    if (g_Config.UseVSForLinePointExpand())
+    if (g_Config.UseVSForLinePointExpand() && !editor.IsEnabled())
     {
       if (g_Config.backend_info.bSupportsPrimitiveRestart)
       {
@@ -284,7 +319,7 @@ u32 VertexManagerBase::GetRemainingIndices(OpcodeDecoder::Primitive primitive) c
       }
     }
   }
-  else if (g_Config.backend_info.bSupportsPrimitiveRestart)
+  else if (supports_primitive_restart)
   {
     switch (primitive)
     {
@@ -333,6 +368,7 @@ void VertexManagerBase::ResetBuffer(u32 vertex_stride)
   m_cur_buffer_pointer = m_cpu_vertex_buffer.data();
   m_end_buffer_pointer = m_base_buffer_pointer + m_cpu_vertex_buffer.size();
   m_index_generator.Start(m_cpu_index_buffer.data());
+  m_last_reset_pointer = m_cur_buffer_pointer;
 }
 
 void VertexManagerBase::CommitBuffer(u32 num_vertices, u32 vertex_stride, u32 num_indices,
@@ -541,56 +577,222 @@ void VertexManagerBase::Flush()
   auto& pixel_shader_manager = system.GetPixelShaderManager();
   auto& geometry_shader_manager = system.GetGeometryShaderManager();
   auto& vertex_shader_manager = system.GetVertexShaderManager();
+  auto& xf_state_manager = system.GetXFStateManager();
   auto& editor = system.GetGraphicsModEditor();
+
+  const auto used_textures = UsedTextures();
+  GraphicsModEditor::DrawCallData data;
 
   if (g_ActiveConfig.bGraphicMods)
   {
-    const double seconds_elapsed =
-        static_cast<double>(m_ticks_elapsed) / SystemTimers::GetTicksPerSecond();
-    pixel_shader_manager.constants.time_ms = seconds_elapsed * 1000;
+    XXH3_64bits_reset_withSeed(m_hash_state_impl->m_graphics_mod_id_hash_state,
+                               m_hash_state_impl->m_graphics_mod_hash_seed);
   }
 
   CalculateBinormals(VertexLoaderManager::GetCurrentVertexFormat());
   // Calculate ZSlope for zfreeze
-  const auto used_textures = UsedTextures();
   std::vector<std::string> texture_names;
-  std::vector<u32> texture_units;
+  Common::SmallVector<u32, 8> texture_units;
   if (!m_cull_all)
   {
-    if (!g_ActiveConfig.bGraphicMods)
+    for (const u32 i : used_textures)
     {
-      for (const u32 i : used_textures)
+      const auto cache_entry = g_texture_cache->Load(TextureInfo::FromStage(i));
+
+      if (g_ActiveConfig.bGraphicMods)
       {
-        g_texture_cache->Load(TextureInfo::FromStage(i));
+        if (editor.IsEnabled())
+        {
+          GraphicsModEditor::DrawCallData::TextureDetails texture_details;
+          texture_details.m_texture = cache_entry->texture.get();
+          texture_details.m_hash = cache_entry->texture_info_name;
+          texture_details.m_texture_unit = i;
+          data.m_textures_details.push_back(std::move(texture_details));
+        }
+        texture_units.push_back(i);
+
+        XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_id_hash_state,
+                           cache_entry->texture_info_name.data(),
+                           cache_entry->texture_info_name.size());
       }
     }
-    else
+  }
+
+  GraphicsMods::DrawCallID draw_call_id = GraphicsMods::DrawCallID::INVALID;
+  if (g_ActiveConfig.bGraphicMods)
+  {
+    const double seconds_elapsed =
+        static_cast<double>(m_ticks_elapsed) / system.GetSystemTimers().GetTicksPerSecond();
+    pixel_shader_manager.constants.time_ms = seconds_elapsed * 1000;
+
+    XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_id_hash_state, &xfmem.projection.type,
+                       sizeof(ProjectionType));
+    XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_id_hash_state, &bpmem.blendmode,
+                       sizeof(BlendMode));
+    // XXH3_64bits_update(m_graphics_mod_id_hash_state, &xfmem.viewport, sizeof(Viewport));
+
+    // if (!IsDrawSkinned(VertexLoaderManager::GetCurrentVertexFormat()))
     {
-      for (const u32 i : used_textures)
+      // const auto world_pos =
+      //     GetLastWorldspacePosition(VertexLoaderManager::GetCurrentVertexFormat());
+      // XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_id_hash_state, &world_pos,
+      // sizeof(world_pos));
+    }
+
+    /*if (!IsDrawSkinned(VertexLoaderManager::GetCurrentVertexFormat()))
+    {
+      XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_id_hash_state,
+    m_index_generator.GetIndexDataStart(), sizeof(u16) * m_index_generator.GetIndexLen()); const u32
+    vertex_count = m_index_generator.GetNumVerts();
+      XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_id_hash_state, &vertex_count,
+    sizeof(u32));
+    }*/
+
+    draw_call_id = GraphicsMods::DrawCallID(
+        XXH3_64bits_digest(m_hash_state_impl->m_graphics_mod_id_hash_state));
+    if (editor.IsEnabled())
+    {
+      data.m_id = draw_call_id;
+      data.m_projection_type = xfmem.projection.type;
+      data.m_create_time = std::chrono::steady_clock::now();
+      data.m_last_update_time = data.m_create_time;
+
+      data.m_world_position =
+          GetLastWorldspacePosition(VertexLoaderManager::GetCurrentVertexFormat());
+
+      data.m_cull_mode = bpmem.genMode.cullmode;
+
+      // Blending
+      data.m_blendenable = bpmem.blendmode.blendenable;
+      data.m_logicopenable = bpmem.blendmode.logicopenable;
+      data.m_dither = bpmem.blendmode.dither;
+      data.m_colorupdate = bpmem.blendmode.colorupdate;
+      data.m_alphaupdate = bpmem.blendmode.alphaupdate;
+      data.m_dstfactor = bpmem.blendmode.dstfactor;
+      data.m_srcfactor = bpmem.blendmode.srcfactor;
+      data.m_subtract = bpmem.blendmode.subtract;
+      data.m_logicmode = bpmem.blendmode.logicmode;
+
+      editor.AddDrawCall(std::move(data));
+    }
+  }
+
+  Common::SmallVector<std::pair<GraphicsMods::LightID, int>, 8> lights_this_draw;
+  if (g_ActiveConfig.bGraphicMods)
+  {
+    // Add any lights
+    const auto& lights_changed = xf_state_manager.GetLightsChanged();
+    if (lights_changed[0] >= 0)
+    {
+      const int istart = lights_changed[0] / 0x10;
+      const int iend = (lights_changed[1] + 15) / 0x10;
+
+      for (int i = istart; i < iend; ++i)
       {
-        const auto cache_entry = g_texture_cache->Load(TextureInfo::FromStage(i));
-        if (cache_entry)
+        const Light& light = xfmem.lights[i];
+
+        VertexShaderConstants::Light dstlight;
+
+        // xfmem.light.color is packed as abgr in u8[4], so we have to swap the order
+        dstlight.color[0] = light.color[3];
+        dstlight.color[1] = light.color[2];
+        dstlight.color[2] = light.color[1];
+        dstlight.color[3] = light.color[0];
+
+        dstlight.cosatt[0] = light.cosatt[0];
+        dstlight.cosatt[1] = light.cosatt[1];
+        dstlight.cosatt[2] = light.cosatt[2];
+
+        if (fabs(light.distatt[0]) < 0.00001f && fabs(light.distatt[1]) < 0.00001f &&
+            fabs(light.distatt[2]) < 0.00001f)
         {
-          if (std::find(texture_names.begin(), texture_names.end(),
-                        cache_entry->texture_info_name) == texture_names.end())
-          {
-            texture_names.push_back(cache_entry->texture_info_name);
-            if (editor.IsEnabled())
-            {
-              GraphicsModEditor::DrawCallData data;
-              data.m_id = GraphicsModEditor::DrawCallID{cache_entry->texture_info_name};
-              data.m_projection_type = xfmem.projection.type;
-              data.m_time = std::chrono::steady_clock::now();
-              data.m_texture = cache_entry->texture.get();
-              editor.AddDrawCall(std::move(data));
-            }
-            texture_units.push_back(i);
-          }
+          // dist attenuation, make sure not equal to 0!!!
+          dstlight.distatt[0] = .00001f;
+        }
+        else
+        {
+          dstlight.distatt[0] = light.distatt[0];
+        }
+        dstlight.distatt[1] = light.distatt[1];
+        dstlight.distatt[2] = light.distatt[2];
+
+        dstlight.pos[0] = light.dpos[0];
+        dstlight.pos[1] = light.dpos[1];
+        dstlight.pos[2] = light.dpos[2];
+
+        // TODO: Hardware testing is needed to confirm that this normalization is correct
+        auto sanitize = [](float f) {
+          if (std::isnan(f))
+            return 0.0f;
+          else if (std::isinf(f))
+            return f > 0.0f ? 1.0f : -1.0f;
+          else
+            return f;
+        };
+        double norm = double(light.ddir[0]) * double(light.ddir[0]) +
+                      double(light.ddir[1]) * double(light.ddir[1]) +
+                      double(light.ddir[2]) * double(light.ddir[2]);
+        norm = 1.0 / sqrt(norm);
+        dstlight.dir[0] = sanitize(static_cast<float>(light.ddir[0] * norm));
+        dstlight.dir[1] = sanitize(static_cast<float>(light.ddir[1] * norm));
+        dstlight.dir[2] = sanitize(static_cast<float>(light.ddir[2] * norm));
+
+        XXH3_64bits_reset_withSeed(m_hash_state_impl->m_graphics_mod_light_hash_state,
+                                   m_hash_state_impl->m_graphics_mod_hash_seed);
+        // XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_light_hash_state, &dstlight.color,
+        // sizeof(int4));
+        XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_light_hash_state, &dstlight.cosatt,
+                           sizeof(float4));
+        XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_light_hash_state, &dstlight.distatt,
+                           sizeof(float4));
+        // XXH3_64bits_update(m_hash_state_impl->m_graphics_mod_light_hash_state, &dstlight.dir,
+        // sizeof(float4));
+        const auto light_id = GraphicsMods::LightID(
+            XXH3_64bits_digest(m_hash_state_impl->m_graphics_mod_light_hash_state));
+        lights_this_draw.emplace_back(light_id, i);
+
+        if (editor.IsEnabled())
+        {
+          GraphicsModEditor::LightData light_data;
+          light_data.m_id = light_id;
+          light_data.m_create_time = std::chrono::steady_clock::now();
+          light_data.m_color = dstlight.color;
+          light_data.m_cosatt = dstlight.cosatt;
+          light_data.m_dir = dstlight.dir;
+          light_data.m_distatt = dstlight.distatt;
+          light_data.m_pos = dstlight.pos;
+          editor.AddLightData(std::move(light_data));
         }
       }
     }
   }
-  vertex_shader_manager.SetConstants(texture_names);
+  vertex_shader_manager.SetConstants(texture_names, xf_state_manager);
+  if (g_ActiveConfig.bGraphicMods)
+  {
+    if (editor.IsEnabled())
+    {
+      for (const auto& light_this_draw : lights_this_draw)
+      {
+        auto& light = vertex_shader_manager.constants.lights[light_this_draw.second];
+        const auto light_id = light_this_draw.first;
+        bool skip = false;
+        GraphicsModActionData::Light light_action_data{&light.color, &light.cosatt, &light.distatt,
+                                                       &light.pos,   &light.dir,    &skip};
+        for (const auto& action : editor.GetLightActions(light_id))
+        {
+          action->OnLight(&light_action_data);
+        }
+        if (skip)
+        {
+          light.color = {};
+          light.cosatt = {};
+          light.distatt = {};
+          light.pos = {};
+          light.dir = {};
+        }
+      }
+    }
+  }
   if (!bpmem.genMode.zfreeze)
   {
     // Must be done after VertexShaderManager::SetConstants()
@@ -604,67 +806,42 @@ void VertexManagerBase::Flush()
 
   if (!m_cull_all)
   {
-    CustomPixelShaderContents custom_pixel_shader_contents;
-    std::optional<CustomPixelShader> custom_pixel_shader;
-    std::vector<std::string> custom_pixel_texture_names;
-    std::span<u8> custom_pixel_shader_uniforms;
-    for (int i = 0; i < texture_names.size(); i++)
-    {
-      const std::string& texture_name = texture_names[i];
-      const u32 texture_unit = texture_units[i];
-      bool skip = false;
-      GraphicsModActionData::DrawStarted draw_started{texture_unit, &skip, &custom_pixel_shader,
-                                                      &custom_pixel_shader_uniforms};
-
-      if (editor.IsEnabled())
-      {
-        for (const auto& action : editor.GetDrawStartedActions(texture_name))
-        {
-          action->OnDrawStarted(&draw_started);
-          if (custom_pixel_shader)
-          {
-            custom_pixel_shader_contents.shaders.push_back(*custom_pixel_shader);
-            custom_pixel_texture_names.push_back(texture_name);
-          }
-          custom_pixel_shader = std::nullopt;
-        }
-      }
-      else
-      {
-        for (const auto& action : g_graphics_mod_manager->GetDrawStartedActions(texture_name))
-        {
-          action->OnDrawStarted(&draw_started);
-          if (custom_pixel_shader)
-          {
-            custom_pixel_shader_contents.shaders.push_back(*custom_pixel_shader);
-            custom_pixel_texture_names.push_back(texture_name);
-          }
-          custom_pixel_shader = std::nullopt;
-        }
-      }
-      if (skip == true)
-        return;
-    }
-
     // Now the vertices can be flushed to the GPU. Everything following the CommitBuffer() call
     // must be careful to not upload any utility vertices, as the binding will be lost otherwise.
     const u32 num_indices = m_index_generator.GetIndexLen();
     if (num_indices == 0)
       return;
-    u32 base_vertex, base_index;
-    CommitBuffer(m_index_generator.GetNumVerts(),
-                 VertexLoaderManager::GetCurrentVertexFormat()->GetVertexStride(), num_indices,
-                 &base_vertex, &base_index);
 
-    if (g_ActiveConfig.backend_info.api_type != APIType::D3D &&
-        g_ActiveConfig.UseVSForLinePointExpand() &&
-        (m_current_primitive_type == PrimitiveType::Points ||
-         m_current_primitive_type == PrimitiveType::Lines))
+    if (editor.IsEnabled())
     {
-      // VS point/line expansion puts the vertex id at gl_VertexID << 2
-      // That means the base vertex has to be adjusted to match
-      // (The shader adds this after shifting right on D3D, so no need to do this)
-      base_vertex <<= 2;
+      auto* scene_dumper = editor.GetSceneDumper();
+      if (scene_dumper && scene_dumper->IsRecording())
+      {
+        if (scene_dumper->IsDrawCallInRecording(draw_call_id))
+        {
+          GraphicsModEditor::SceneDumper::DrawData draw_data;
+          draw_data.num_vertices = m_index_generator.GetNumVerts();
+          draw_data.num_indices = m_index_generator.GetIndexLen();
+          draw_data.indices = m_cpu_index_buffer.data();
+          draw_data.vertex_format = VertexLoaderManager::GetCurrentVertexFormat();
+          draw_data.vertices = m_last_reset_pointer;
+          draw_data.primitive_type = m_current_primitive_type;
+          draw_data.enable_blending = bpmem.blendmode.blendenable;
+          if (!draw_data.vertex_format->GetVertexDeclaration().posmtx.enable)
+          {
+            float* pos = &xfmem.posMatrices[g_main_cp_state.matrix_index_a.PosNormalMtxIdx * 4];
+            draw_data.transform = {pos, 12};
+          }
+
+          for (const u32 i : used_textures)
+          {
+            const auto cache_entry = g_texture_cache->Load(TextureInfo::FromStage(i));
+            draw_data.textures.emplace_back(GraphicsModEditor::SceneDumper::DrawData::Texture{
+                cache_entry->texture.get(), cache_entry->texture_info_name});
+          }
+          scene_dumper->AddDataToRecording(draw_call_id, std::move(draw_data));
+        }
+      }
     }
 
     // Texture loading can cause palettes to be applied (-> uniforms -> draws).
@@ -672,95 +849,113 @@ void VertexManagerBase::Flush()
     // Same with GPU texture decoding, which uses compute shaders.
     g_texture_cache->BindTextures(used_textures);
 
-    // Now we can upload uniforms, as nothing else will override them.
-    geometry_shader_manager.SetConstants(m_current_primitive_type);
-    pixel_shader_manager.SetConstants();
-    if (!custom_pixel_shader_uniforms.empty() &&
-        pixel_shader_manager.custom_constants.data() != custom_pixel_shader_uniforms.data())
+    CustomPixelShaderContents custom_pixel_shader_contents;
+    std::optional<CustomPixelShader> custom_pixel_shader;
+    std::span<u8> custom_pixel_shader_uniforms;
+    bool skip = false;
+    if (g_ActiveConfig.bGraphicMods)
     {
-      pixel_shader_manager.custom_constants_dirty = true;
-    }
-    pixel_shader_manager.custom_constants = custom_pixel_shader_uniforms;
-    UploadUniforms();
+      bool more_data = true;
+      u32 mesh_index = 0;
+      std::optional<GraphicsModActionData::MeshChunk> mesh_chunk;
+      GraphicsModActionData::DrawStarted draw_started{
+          texture_units,
+          *VertexLoaderManager::GetCurrentVertexFormat(),
+          VertexLoaderManager::g_current_components,
+          &skip,
+          &custom_pixel_shader,
+          &custom_pixel_shader_uniforms,
+          &mesh_chunk,
+          &mesh_index,
+          &more_data};
 
-    // Update the pipeline, or compile one if needed.
-    UpdatePipelineConfig();
-    UpdatePipelineObject();
-    if (m_current_pipeline_object)
-    {
-      const AbstractPipeline* current_pipeline = m_current_pipeline_object;
-      if (!custom_pixel_shader_contents.shaders.empty())
+      if (editor.IsEnabled())
       {
-        CustomShaderInstance custom_shaders;
-        custom_shaders.pixel_contents = std::move(custom_pixel_shader_contents);
+        for (const auto& action : editor.GetDrawStartedActions(draw_call_id))
+        {
+          more_data = true;
+          mesh_index = 0;
+          while (more_data)
+          {
+            more_data = false;
+            action->OnDrawStarted(&draw_started);
+            if (custom_pixel_shader)
+            {
+              custom_pixel_shader_contents.shaders.clear();
+              custom_pixel_shader_contents.shaders.push_back(*custom_pixel_shader);
+            }
+            custom_pixel_shader = std::nullopt;
 
-        switch (g_ActiveConfig.iShaderCompilationMode)
-        {
-        case ShaderCompilationMode::Synchronous:
-        case ShaderCompilationMode::AsynchronousSkipRendering:
-        {
-          if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
-                  m_current_pipeline_config, custom_shaders, m_current_pipeline_object->m_config))
-          {
-            current_pipeline = *pipeline;
-          }
-        }
-        break;
-        case ShaderCompilationMode::SynchronousUberShaders:
-        {
-          // D3D has issues compiling large custom ubershaders
-          // use specialized shaders instead
-          if (g_ActiveConfig.backend_info.api_type == APIType::D3D)
-          {
-            if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
-                    m_current_pipeline_config, custom_shaders, m_current_pipeline_object->m_config))
+            if (mesh_chunk)
             {
-              current_pipeline = *pipeline;
-            }
-          }
-          else
-          {
-            if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
-                    m_current_uber_pipeline_config, custom_shaders,
-                    m_current_pipeline_object->m_config))
-            {
-              current_pipeline = *pipeline;
+              if (const auto current_pipeline =
+                      GetCustomPipeline(custom_pixel_shader_contents, GetPipelineState(*mesh_chunk),
+                                        GetUberPipelineState(*mesh_chunk), nullptr))
+              {
+                vertex_shader_manager.SetVertexFormat(
+                    mesh_chunk->components_available,
+                    mesh_chunk->vertex_format->GetVertexDeclaration());
+                memcpy(vertex_shader_manager.constants.custom_transform.data(),
+                       mesh_chunk->transform.data.data(), 4 * sizeof(float4));
+                RenderDrawCall(pixel_shader_manager, geometry_shader_manager,
+                               custom_pixel_shader_contents, custom_pixel_shader_uniforms,
+                               mesh_chunk, mesh_chunk->primitive_type, current_pipeline);
+
+                // For now skip the normal mesh
+                skip = true;
+              }
             }
           }
         }
-        break;
-        case ShaderCompilationMode::AsynchronousUberShaders:
-        {
-          if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
-                  m_current_pipeline_config, custom_shaders, m_current_pipeline_object->m_config))
-          {
-            current_pipeline = *pipeline;
-          }
-          else if (auto uber_pipeline = m_custom_shader_cache->GetPipelineAsync(
-                       m_current_uber_pipeline_config, custom_shaders,
-                       m_current_pipeline_object->m_config))
-          {
-            current_pipeline = *uber_pipeline;
-          }
-        }
-        break;
-        };
       }
-      g_gfx->SetPipeline(current_pipeline);
-      if (PerfQueryBase::ShouldEmulate())
-        g_perf_query->EnableQuery(bpmem.zcontrol.early_ztest ? PQG_ZCOMP_ZCOMPLOC : PQG_ZCOMP);
-
-      DrawCurrentBatch(base_index, num_indices, base_vertex);
-      INCSTAT(g_stats.this_frame.num_draw_calls);
-
-      if (PerfQueryBase::ShouldEmulate())
-        g_perf_query->DisableQuery(bpmem.zcontrol.early_ztest ? PQG_ZCOMP_ZCOMPLOC : PQG_ZCOMP);
-
-      OnDraw();
-
-      // The EFB cache is now potentially stale.
-      g_framebuffer_manager->FlagPeekCacheAsOutOfDate();
+      else
+      {
+        for (const auto& action : g_graphics_mod_manager->GetDrawStartedActions(draw_call_id))
+        {
+          action->OnDrawStarted(&draw_started);
+          if (custom_pixel_shader)
+          {
+            custom_pixel_shader_contents.shaders.push_back(*custom_pixel_shader);
+          }
+          custom_pixel_shader = std::nullopt;
+        }
+      }
     }
+
+    if (!skip)
+    {
+      UpdatePipelineConfig();
+      UpdatePipelineObject();
+      if (m_current_pipeline_object)
+      {
+        static const auto identity_mat = Common::Matrix44::Identity();
+        memcpy(vertex_shader_manager.constants.custom_transform.data(), identity_mat.data.data(),
+               4 * sizeof(float4));
+        const AbstractPipeline* pipeline_object = m_current_pipeline_object;
+        if (!custom_pixel_shader_contents.shaders.empty())
+        {
+          if (const auto custom_pipeline =
+                  GetCustomPipeline(custom_pixel_shader_contents, m_current_pipeline_config,
+                                    m_current_uber_pipeline_config, m_current_pipeline_object))
+          {
+            pipeline_object = custom_pipeline;
+          }
+        }
+        RenderDrawCall(pixel_shader_manager, geometry_shader_manager, custom_pixel_shader_contents,
+                       custom_pixel_shader_uniforms, std::nullopt, m_current_primitive_type,
+                       pipeline_object);
+      }
+    }
+
+    INCSTAT(g_stats.this_frame.num_draw_calls);
+
+    if (PerfQueryBase::ShouldEmulate())
+      g_perf_query->DisableQuery(bpmem.zcontrol.early_ztest ? PQG_ZCOMP_ZCOMPLOC : PQG_ZCOMP);
+
+    OnDraw();
+
+    // The EFB cache is now potentially stale.
+    g_framebuffer_manager->FlagPeekCacheAsOutOfDate();
   }
 
   if (xfmem.numTexGen.numTexGens != bpmem.genMode.numtexgens)
@@ -768,6 +963,56 @@ void VertexManagerBase::Flush()
     ERROR_LOG_FMT(VIDEO,
                   "xf.numtexgens ({}) does not match bp.numtexgens ({}). Error in command stream.",
                   xfmem.numTexGen.numTexGens, bpmem.genMode.numtexgens.Value());
+  }
+}
+
+void VertexManagerBase::RenderDrawCall(
+    PixelShaderManager& pixel_shader_manager, GeometryShaderManager& geometry_shader_manager,
+    const CustomPixelShaderContents& custom_pixel_shader_contents,
+    std::span<u8> custom_pixel_shader_uniforms,
+    const std::optional<GraphicsModActionData::MeshChunk>& mesh_chunk, PrimitiveType primitive_type,
+    const AbstractPipeline* current_pipeline)
+{
+  // Now we can upload uniforms, as nothing else will override them.
+  geometry_shader_manager.SetConstants(primitive_type);
+  pixel_shader_manager.SetConstants();
+  if (!custom_pixel_shader_uniforms.empty() &&
+      pixel_shader_manager.custom_constants.data() != custom_pixel_shader_uniforms.data())
+  {
+    pixel_shader_manager.custom_constants_dirty = true;
+  }
+  pixel_shader_manager.custom_constants = custom_pixel_shader_uniforms;
+  UploadUniforms();
+
+  g_gfx->SetPipeline(current_pipeline);
+  if (PerfQueryBase::ShouldEmulate())
+    g_perf_query->EnableQuery(bpmem.zcontrol.early_ztest ? PQG_ZCOMP_ZCOMPLOC : PQG_ZCOMP);
+
+  if (!mesh_chunk)
+  {
+    u32 base_vertex, base_index;
+    CommitBuffer(m_index_generator.GetNumVerts(),
+                 VertexLoaderManager::GetCurrentVertexFormat()->GetVertexStride(),
+                 m_index_generator.GetIndexLen(), &base_vertex, &base_index);
+
+    if (g_ActiveConfig.backend_info.api_type != APIType::D3D &&
+        g_ActiveConfig.UseVSForLinePointExpand() &&
+        (primitive_type == PrimitiveType::Points || primitive_type == PrimitiveType::Lines))
+    {
+      // VS point/line expansion puts the vertex id at gl_VertexID << 2
+      // That means the base vertex has to be adjusted to match
+      // (The shader adds this after shifting right on D3D, so no need to do this)
+      base_vertex <<= 2;
+    }
+
+    DrawCurrentBatch(base_index, m_index_generator.GetIndexLen(), base_vertex);
+  }
+  else
+  {
+    u32 base_vertex, base_index;
+    UploadUtilityVertices(mesh_chunk->vertices, mesh_chunk->vertex_stride, mesh_chunk->num_vertices,
+                          mesh_chunk->indices, mesh_chunk->num_indices, &base_vertex, &base_index);
+    g_gfx->DrawIndexed(base_index, mesh_chunk->num_indices, base_vertex);
   }
 }
 
@@ -875,6 +1120,61 @@ void VertexManagerBase::CalculateBinormals(NativeVertexFormat* format)
     vertex_shader_manager.constants.cached_binormal = VertexLoaderManager::binormal_cache;
     vertex_shader_manager.dirty = true;
   }
+}
+
+std::array<float, 4> VertexManagerBase::GetLastWorldspacePosition(NativeVertexFormat* format) const
+{
+  if (m_current_primitive_type != PrimitiveType::Triangles &&
+      m_current_primitive_type != PrimitiveType::TriangleStrip)
+  {
+    return {};
+  }
+
+  // Global matrix ID.
+  u32 mtxIdx = g_main_cp_state.matrix_index_a.PosNormalMtxIdx;
+  const PortableVertexDeclaration vert_decl = format->GetVertexDeclaration();
+
+  // Make sure the buffer contains at least 3 vertices.
+  if ((m_cur_buffer_pointer - m_base_buffer_pointer) < (vert_decl.stride * 3))
+    return {};
+
+  // If this vertex format has per-vertex position matrix IDs, look it up.
+  if (vert_decl.posmtx.enable)
+    mtxIdx = VertexLoaderManager::position_matrix_index_cache[2];
+
+  // Lookup vertices of the last rendered triangle and software-transform them
+  // This allows us to determine the worldspace position.
+  const float* viewspace_pos = &VertexLoaderManager::position_cache[2][0];
+
+  const float* world_matrix = &xfmem.posMatrices[(mtxIdx & 0x3f) * 4];
+  float worldspace_pos[3] = {
+      viewspace_pos[0] * world_matrix[0] + viewspace_pos[1] * world_matrix[1] +
+          viewspace_pos[2] * world_matrix[2] + world_matrix[3],
+      viewspace_pos[0] * world_matrix[4] + viewspace_pos[1] * world_matrix[5] +
+          viewspace_pos[2] * world_matrix[6] + world_matrix[7],
+      viewspace_pos[0] * world_matrix[8] + viewspace_pos[1] * world_matrix[9] +
+          viewspace_pos[2] * world_matrix[10] + world_matrix[11]};
+  worldspace_pos[0] = std::round(worldspace_pos[0] * 1000.0f) / 1000.0f;
+  worldspace_pos[1] = std::round(worldspace_pos[1] * 1000.0f) / 1000.0f;
+  worldspace_pos[2] = std::round(worldspace_pos[2] * 1000.0f) / 1000.0f;
+  return std::array<float, 4>{worldspace_pos[0], worldspace_pos[1], worldspace_pos[2], 1};
+}
+
+bool VertexManagerBase::IsDrawSkinned(NativeVertexFormat* format) const
+{
+  if (m_current_primitive_type != PrimitiveType::Triangles &&
+      m_current_primitive_type != PrimitiveType::TriangleStrip)
+  {
+    return false;
+  }
+
+  const PortableVertexDeclaration vert_decl = format->GetVertexDeclaration();
+
+  // Make sure the buffer contains at least 3 vertices.
+  if ((m_cur_buffer_pointer - m_base_buffer_pointer) < (vert_decl.stride * 3))
+    return false;
+
+  return vert_decl.posmtx.enable;
 }
 
 void VertexManagerBase::UpdatePipelineConfig()
@@ -1011,8 +1311,10 @@ void VertexManagerBase::UpdatePipelineObject()
 
 void VertexManagerBase::OnConfigChange()
 {
+  auto& system = Core::System::GetInstance();
+  auto& editor = system.GetGraphicsModEditor();
   // Reload index generator function tables in case VS expand config changed
-  m_index_generator.Init();
+  m_index_generator.Init(editor.IsEnabled());
 }
 
 void VertexManagerBase::OnDraw()
@@ -1148,4 +1450,240 @@ void VertexManagerBase::NotifyCustomShaderCacheOfHostChange(const ShaderHostConf
 {
   m_custom_shader_cache->SetHostConfig(host_config);
   m_custom_shader_cache->Reload();
+}
+
+VideoCommon::GXPipelineUid
+VertexManagerBase::GetPipelineState(const GraphicsModActionData::MeshChunk& mesh_chunk)
+{
+  VideoCommon::GXPipelineUid result;
+  result.vertex_format = mesh_chunk.vertex_format;
+  result.vs_uid = GetVertexShaderUid();
+  vertex_shader_uid_data* const vs_uid_data = result.vs_uid.GetUidData();
+  vs_uid_data->components = mesh_chunk.components_available;
+
+  auto& tex_coords = mesh_chunk.vertex_format->GetVertexDeclaration().texcoords;
+  u32 texcoord_count = 0;
+  for (u32 i = 0; i < 8; ++i)
+  {
+    auto& texcoord = tex_coords[i];
+    if (texcoord.enable)
+    {
+      if ((vs_uid_data->components & (VB_HAS_UV0 << i)) != 0)
+      {
+        auto& texinfo = vs_uid_data->texMtxInfo[texcoord_count];
+        texinfo.texgentype = TexGenType::Passthrough;
+        texinfo.inputform = TexInputForm::ABC1;
+        texinfo.sourcerow = static_cast<SourceRow>(static_cast<u32>(SourceRow::Tex0) + i);
+      }
+      texcoord_count++;
+    }
+  }
+  vs_uid_data->numTexGens = texcoord_count;
+
+  auto& colors = mesh_chunk.vertex_format->GetVertexDeclaration().colors;
+  u32 color_count = 0;
+  for (u32 i = 0; i < 2; ++i)
+  {
+    auto& color = colors[i];
+    if (color.enable)
+    {
+      color_count++;
+    }
+  }
+  vs_uid_data->numColorChans = color_count;
+
+  vs_uid_data->dualTexTrans_enabled = false;
+
+  result.ps_uid = GetPixelShaderUid();
+  pixel_shader_uid_data* const ps_uid_data = result.ps_uid.GetUidData();
+  ps_uid_data->useDstAlpha = false;
+
+  ps_uid_data->genMode_numindstages = 0;
+  ps_uid_data->genMode_numtevstages = 0;
+  ps_uid_data->genMode_numtexgens = vs_uid_data->numTexGens;
+  ps_uid_data->bounding_box = false;
+  ps_uid_data->rgba6_format = false;
+  ps_uid_data->dither = false;
+  ps_uid_data->uint_output = false;
+
+  geometry_shader_uid_data* const gs_uid_data = result.gs_uid.GetUidData();
+  gs_uid_data->primitive_type = static_cast<u32>(mesh_chunk.primitive_type);
+  gs_uid_data->numTexGens = vs_uid_data->numTexGens;
+
+  result.rasterization_state.cullmode = mesh_chunk.cull_mode;
+  result.rasterization_state.primitive = mesh_chunk.primitive_type;
+  result.depth_state.func = CompareMode::LEqual;
+  result.depth_state.testenable = true;
+  result.depth_state.updateenable = true;
+  result.blending_state = RenderState::GetNoBlendingBlendState();
+  // result.depth_state.Generate(bpmem);
+  // result.blending_state.Generate(bpmem);
+  /*result.blending_state.blendenable = true;
+  result.blending_state.srcfactor = SrcBlendFactor::SrcAlpha;
+  result.blending_state.dstfactor = DstBlendFactor::InvSrcAlpha;
+  result.blending_state.srcfactoralpha = SrcBlendFactor::Zero;
+  result.blending_state.dstfactoralpha = DstBlendFactor::One;*/
+
+  return result;
+}
+
+VideoCommon::GXUberPipelineUid
+VertexManagerBase::GetUberPipelineState(const GraphicsModActionData::MeshChunk& mesh_chunk)
+{
+  VideoCommon::GXUberPipelineUid result;
+  result.vertex_format =
+      VertexLoaderManager::GetUberVertexFormat(mesh_chunk.vertex_format->GetVertexDeclaration());
+  result.vs_uid = UberShader::GetVertexShaderUid();
+  UberShader::vertex_ubershader_uid_data* const vs_uid_data = result.vs_uid.GetUidData();
+
+  auto& tex_coords = mesh_chunk.vertex_format->GetVertexDeclaration().texcoords;
+  u32 texcoord_count = 0;
+  for (u32 i = 0; i < 8; ++i)
+  {
+    auto& texcoord = tex_coords[i];
+    if (texcoord.enable)
+    {
+      texcoord_count++;
+    }
+  }
+  vs_uid_data->num_texgens = texcoord_count;
+
+  result.ps_uid = UberShader::GetPixelShaderUid();
+  UberShader::pixel_ubershader_uid_data* const ps_uid_data = result.ps_uid.GetUidData();
+  ps_uid_data->num_texgens = vs_uid_data->num_texgens;
+  ps_uid_data->uint_output = false;
+
+  geometry_shader_uid_data* const gs_uid_data = result.gs_uid.GetUidData();
+  gs_uid_data->primitive_type = static_cast<u32>(mesh_chunk.primitive_type);
+  gs_uid_data->numTexGens = vs_uid_data->num_texgens;
+
+  result.rasterization_state.cullmode = mesh_chunk.cull_mode;
+  result.rasterization_state.primitive = mesh_chunk.primitive_type;
+  result.depth_state.func = CompareMode::LEqual;
+  result.depth_state.testenable = true;
+  result.depth_state.updateenable = true;
+  result.blending_state = RenderState::GetNoBlendingBlendState();
+  // result.depth_state.Generate(bpmem);
+  // result.blending_state.Generate(bpmem);
+  /*result.blending_state.blendenable = true;
+  result.blending_state.srcfactor = SrcBlendFactor::SrcAlpha;
+  result.blending_state.dstfactor = DstBlendFactor::InvSrcAlpha;
+  result.blending_state.srcfactoralpha = SrcBlendFactor::Zero;
+  result.blending_state.dstfactoralpha = DstBlendFactor::One;*/
+
+  return result;
+}
+
+const AbstractPipeline* VertexManagerBase::GetCustomPipeline(
+    const CustomPixelShaderContents& custom_pixel_shader_contents,
+    const VideoCommon::GXPipelineUid& current_pipeline_config,
+    const VideoCommon::GXUberPipelineUid& current_uber_pipeline_config,
+    const AbstractPipeline* current_pipeline) const
+{
+  if (current_pipeline)
+  {
+    if (!custom_pixel_shader_contents.shaders.empty())
+    {
+      CustomShaderInstance custom_shaders;
+      custom_shaders.pixel_contents = custom_pixel_shader_contents;
+      switch (g_ActiveConfig.iShaderCompilationMode)
+      {
+      case ShaderCompilationMode::Synchronous:
+      case ShaderCompilationMode::AsynchronousSkipRendering:
+      {
+        if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
+                current_pipeline_config, custom_shaders, current_pipeline->m_config))
+        {
+          return *pipeline;
+        }
+      }
+      break;
+      case ShaderCompilationMode::SynchronousUberShaders:
+      {
+        // D3D has issues compiling large custom ubershaders
+        // use specialized shaders instead
+        if (g_ActiveConfig.backend_info.api_type == APIType::D3D)
+        {
+          if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
+                  current_pipeline_config, custom_shaders, current_pipeline->m_config))
+          {
+            return *pipeline;
+          }
+        }
+        else
+        {
+          if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
+                  current_uber_pipeline_config, custom_shaders, current_pipeline->m_config))
+          {
+            return *pipeline;
+          }
+        }
+      }
+      break;
+      case ShaderCompilationMode::AsynchronousUberShaders:
+      {
+        if (auto pipeline = m_custom_shader_cache->GetPipelineAsync(
+                current_pipeline_config, custom_shaders, current_pipeline->m_config))
+        {
+          return *pipeline;
+        }
+        else if (auto uber_pipeline = m_custom_shader_cache->GetPipelineAsync(
+                     current_uber_pipeline_config, custom_shaders, current_pipeline->m_config))
+        {
+          return *uber_pipeline;
+        }
+      }
+      break;
+      };
+    }
+  }
+  else
+  {
+    switch (g_ActiveConfig.iShaderCompilationMode)
+    {
+    case ShaderCompilationMode::Synchronous:
+    {
+      // Ubershaders disabled? Block and compile the specialized shader.
+      const auto base_pipeline = m_custom_shader_cache->GetPipelineForUid(current_pipeline_config);
+      return GetCustomPipeline(custom_pixel_shader_contents, current_pipeline_config,
+                               current_uber_pipeline_config, base_pipeline);
+    }
+
+    case ShaderCompilationMode::SynchronousUberShaders:
+    {
+      // Exclusive ubershader mode, always use ubershaders.
+      const auto base_pipeline =
+          m_custom_shader_cache->GetUberPipelineForUid(current_uber_pipeline_config);
+      return GetCustomPipeline(custom_pixel_shader_contents, current_pipeline_config,
+                               current_uber_pipeline_config, base_pipeline);
+    }
+
+    case ShaderCompilationMode::AsynchronousUberShaders:
+    case ShaderCompilationMode::AsynchronousSkipRendering:
+    {
+      // Can we background compile shaders? If so, get the pipeline asynchronously.
+      auto res = m_custom_shader_cache->GetPipelineForUidAsync(current_pipeline_config);
+      if (res)
+      {
+        // Specialized shaders are ready, prefer these.
+        const auto base_pipeline = *res;
+        if (base_pipeline == nullptr)
+          return nullptr;
+        return GetCustomPipeline(custom_pixel_shader_contents, current_pipeline_config,
+                                 current_uber_pipeline_config, base_pipeline);
+      }
+
+      if (g_ActiveConfig.iShaderCompilationMode == ShaderCompilationMode::AsynchronousUberShaders)
+      {
+        // Specialized shaders not ready, use the ubershaders.
+        const auto base_pipeline =
+            m_custom_shader_cache->GetUberPipelineForUid(current_uber_pipeline_config);
+        return GetCustomPipeline(custom_pixel_shader_contents, current_pipeline_config,
+                                 current_uber_pipeline_config, base_pipeline);
+      }
+    }
+    }
+  }
+
+  return nullptr;
 }

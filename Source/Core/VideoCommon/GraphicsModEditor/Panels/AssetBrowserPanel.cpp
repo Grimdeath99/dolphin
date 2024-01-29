@@ -15,6 +15,7 @@
 #include "Common/VariantUtil.h"
 #include "Core/System.h"
 #include "VideoCommon/Assets/CustomAssetLoader.h"
+#include "VideoCommon/GraphicsModEditor/Controls/MeshImportWindow.h"
 #include "VideoCommon/GraphicsModEditor/EditorEvents.h"
 #include "VideoCommon/Present.h"
 
@@ -40,9 +41,6 @@ namespace GraphicsModEditor::Panels
 AssetBrowserPanel::AssetBrowserPanel(EditorState& state) : m_state(state)
 {
   ResetCurrentPath();
-
-  m_selection_event = EditorEvents::ItemsSelectedEvent::Register(
-      [this](const auto& selected_targets) {}, "EditorAssetBrowserPanelSelection");
 }
 
 void AssetBrowserPanel::ResetCurrentPath()
@@ -174,6 +172,43 @@ void AssetBrowserPanel::DrawImGui()
           ImGui::EndGroup();
           columns_displayed++;
         }
+        else if (ext == ".dolmesh")
+        {
+          ImGui::TableNextColumn();
+          ImGui::BeginGroup();
+          HandleAsset(entry, m_state.m_editor_data.m_name_to_texture["file"].get(), "MeshAsset");
+          ImGui::EndGroup();
+          columns_displayed++;
+        }
+        else if (ext == ".gltf")
+        {
+          ImGui::TableNextColumn();
+          ImGui::BeginGroup();
+          ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.5);
+          ImGui::ImageButton(PathToString(entry).c_str(),
+                             m_state.m_editor_data.m_name_to_texture["file"].get(),
+                             thumbnail_imgui_size);
+          ImGui::PopStyleVar();
+          if (ImGui::BeginPopupContextItem())
+          {
+            if (ImGui::Selectable("Import"))
+            {
+              m_is_mesh_import_active = true;
+              m_mesh_import_filename = WithUnifiedPathSeparators(PathToString(full_path / entry));
+            }
+
+            ImGui::EndPopup();
+          }
+          ImGui::OpenPopupOnItemClick(PathToString(entry).c_str(),
+                                      ImGuiPopupFlags_MouseButtonRight);
+
+          ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.5);
+          ImGui::TextWrapped("%s", PathToString(entry.stem()).c_str());
+          ImGui::PopStyleVar();
+
+          ImGui::EndGroup();
+          columns_displayed++;
+        }
         else if (ext == ".material")
         {
           ImGui::TableNextColumn();
@@ -189,6 +224,15 @@ void AssetBrowserPanel::DrawImGui()
           ImGui::TableNextRow();
           columns_displayed = 0;
         }
+      }
+    }
+
+    if (m_is_mesh_import_active)
+    {
+      if (Controls::ShowMeshImportWindow(m_mesh_import_filename, &m_mesh_import_import_materials))
+      {
+        m_is_mesh_import_active = false;
+        m_mesh_import_import_materials = false;
       }
     }
 
@@ -387,9 +431,13 @@ void AssetBrowserPanel::HandleAsset(const std::filesystem::path& asset_path,
         {
           auto& system = Core::System::GetInstance();
           auto& loader = system.GetCustomAssetLoader();
-          m_state.m_editor_data.m_assets_waiting_for_preview.try_emplace(
-              asset->m_asset_id,
-              loader.LoadGameTexture(asset->m_asset_id, m_state.m_user_data.m_asset_library));
+          // TODO: generate previews for other assets...
+          if (asset->m_asset_map.find("texture") != asset->m_asset_map.end())
+          {
+            m_state.m_editor_data.m_assets_waiting_for_preview.try_emplace(
+                asset->m_asset_id,
+                loader.LoadGameTexture(asset->m_asset_id, m_state.m_user_data.m_asset_library));
+          }
         }
       }
       ImGui::EndPopup();

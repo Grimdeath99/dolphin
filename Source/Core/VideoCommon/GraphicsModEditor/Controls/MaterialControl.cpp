@@ -3,12 +3,14 @@
 
 #include "VideoCommon/GraphicsModEditor/Controls/MaterialControl.h"
 
-#include <optional>
 #include <string>
+#include <variant>
 
 #include <fmt/format.h>
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
+
+#include "Common/VariantUtil.h"
 
 #include "VideoCommon/Assets/MaterialAsset.h"
 #include "VideoCommon/Assets/ShaderAsset.h"
@@ -20,132 +22,100 @@ namespace GraphicsModEditor::Controls
 {
 namespace
 {
-template <typename ElementType, std::size_t ElementSize, bool IsColor>
-void DrawNumericUniformControl(const std::string& code_name,
-                               std::optional<VideoCommon::MaterialProperty::Value>* value,
-                               VideoCommon::CustomAssetLibrary::TimeType* last_data_write)
+void SetMaterialPropertiesFromShader(const VideoCommon::PixelShaderData& shader,
+                                     VideoCommon::MaterialData* material)
 {
-  if (*value)
+  material->properties.clear();
+  for (const auto& entry : shader.m_properties)
   {
-    if constexpr (ElementSize == 1)
-    {
-      if (const auto val = std::get_if<ElementType>(&value->value()))
-      {
-        if constexpr (std::is_same<ElementType, int>::value)
-        {
-          if (ImGui::InputInt(fmt::format("##{}", code_name).c_str(), val))
-          {
-            *last_data_write = std::chrono::system_clock::now();
-            GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-          }
-        }
-        else
-        {
-          if (ImGui::InputFloat(fmt::format("##{}", code_name).c_str(), val))
-          {
-            *last_data_write = std::chrono::system_clock::now();
-            GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-          }
-        }
-      }
-    }
-    else
-    {
-      if (const auto val = std::get_if<std::array<ElementType, ElementSize>>(&value->value()))
-      {
-        if constexpr (ElementSize == 2)
-        {
-          if constexpr (std::is_same<ElementType, int>::value)
-          {
-            if (ImGui::InputInt2(fmt::format("##{}", code_name).c_str(), val->data()))
-            {
-              *last_data_write = std::chrono::system_clock::now();
-              GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-            }
-          }
-          else
-          {
-            if (ImGui::InputFloat2(fmt::format("##{}", code_name).c_str(), val->data()))
-            {
-              *last_data_write = std::chrono::system_clock::now();
-              GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-            }
-          }
-        }
-        else if constexpr (ElementSize == 3)
-        {
-          if constexpr (std::is_same<ElementType, int>::value)
-          {
-            if (ImGui::InputInt3(fmt::format("##{}", code_name).c_str(), val->data()))
-            {
-              *last_data_write = std::chrono::system_clock::now();
-              GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-            }
-          }
-          else
-          {
-            if constexpr (IsColor)
-            {
-              if (ImGui::ColorEdit3(fmt::format("##{}", code_name).c_str(), val->data()))
-              {
-                *last_data_write = std::chrono::system_clock::now();
-                GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-              }
-            }
-            else
-            {
-              if (ImGui::InputFloat3(fmt::format("##{}", code_name).c_str(), val->data()))
-              {
-                *last_data_write = std::chrono::system_clock::now();
-                GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-              }
-            }
-          }
-        }
-        else if constexpr (ElementSize == 4)
-        {
-          if constexpr (std::is_same<ElementType, int>::value)
-          {
-            if (ImGui::InputInt4(fmt::format("##{}", code_name).c_str(), val->data()))
-            {
-              *last_data_write = std::chrono::system_clock::now();
-              GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-            }
-          }
-          else
-          {
-            if constexpr (IsColor)
-            {
-              if (ImGui::ColorEdit4(fmt::format("##{}", code_name).c_str(), val->data()))
-              {
-                *last_data_write = std::chrono::system_clock::now();
-                GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-              }
-            }
-            else
-            {
-              if (ImGui::InputFloat4(fmt::format("##{}", code_name).c_str(), val->data()))
-              {
-                *last_data_write = std::chrono::system_clock::now();
-                GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-              }
-            }
-          }
-        }
-      }
-    }
-  }
-  else
-  {
-    if constexpr (ElementSize == 1)
-    {
-      *value = ElementType{};
-    }
-    else
-    {
-      *value = std::array<ElementType, ElementSize>{};
-    }
-    DrawNumericUniformControl<ElementType, ElementSize, IsColor>(code_name, value, last_data_write);
+    // C++20: error with capturing structured bindings for our version of clang
+    const auto& name = entry.first;
+    const auto& shader_property = entry.second;
+    std::visit(overloaded{[&](const VideoCommon::ShaderProperty::Sampler2D& default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value.value;
+                            material->properties.push_back(std::move(property));
+                          },
+                          [&](const VideoCommon::ShaderProperty::Sampler2DArray& default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value.value;
+                            material->properties.push_back(std::move(property));
+                          },
+                          [&](const VideoCommon::ShaderProperty::SamplerCube& default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value.value;
+                            material->properties.push_back(std::move(property));
+                          },
+                          [&](s32 default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value;
+                            material->properties.push_back(std::move(property));
+                          },
+                          [&](const std::array<s32, 2>& default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value;
+                            material->properties.push_back(std::move(property));
+                          },
+                          [&](const std::array<s32, 3>& default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value;
+                            material->properties.push_back(std::move(property));
+                          },
+                          [&](const std::array<s32, 4>& default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value;
+                            material->properties.push_back(std::move(property));
+                          },
+                          [&](float default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value;
+                            material->properties.push_back(std::move(property));
+                          },
+                          [&](const std::array<float, 2>& default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value;
+                            material->properties.push_back(std::move(property));
+                          },
+                          [&](const std::array<float, 3>& default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value;
+                            material->properties.push_back(std::move(property));
+                          },
+                          [&](const std::array<float, 4>& default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value;
+                            material->properties.push_back(std::move(property));
+                          },
+                          [&](const VideoCommon::ShaderProperty::RGB& default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value.value;
+                            material->properties.push_back(std::move(property));
+                          },
+                          [&](const VideoCommon::ShaderProperty::RGBA& default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value.value;
+                            material->properties.push_back(std::move(property));
+                          },
+                          [&](bool default_value) {
+                            VideoCommon::MaterialProperty property;
+                            property.m_code_name = name;
+                            property.m_value = default_value;
+                            material->properties.push_back(std::move(property));
+                          }},
+               shader_property.m_default);
   }
 }
 }  // namespace
@@ -153,11 +123,19 @@ MaterialControl::MaterialControl(EditorState& state) : m_state(state)
 {
 }
 
-void MaterialControl::DrawImGui(VideoCommon::MaterialData* material,
-                                VideoCommon::CustomAssetLibrary::TimeType* last_data_write)
+void MaterialControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& asset_id,
+                                VideoCommon::MaterialData* material,
+                                VideoCommon::CustomAssetLibrary::TimeType* last_data_write,
+                                bool* valid)
 {
   if (ImGui::BeginTable("MaterialShaderForm", 2))
   {
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("ID");
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", asset_id.c_str());
+
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     ImGui::Text("Shader");
@@ -166,11 +144,37 @@ void MaterialControl::DrawImGui(VideoCommon::MaterialData* material,
     if (AssetDisplay("MaterialShaderAsset", &m_state, &material->shader_asset,
                      AssetDataType::PixelShader))
     {
-      *last_data_write = std::chrono::system_clock::now();
-      GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+      auto asset = m_state.m_user_data.m_asset_library->GetAssetFromID(material->shader_asset);
+      if (!asset)
+      {
+        ImGui::Text("Please choose a shader for this material");
+        material->shader_asset = "";
+        *valid = false;
+        return;
+      }
+      else
+      {
+        auto shader = std::get_if<std::unique_ptr<VideoCommon::PixelShaderData>>(&asset->m_data);
+        if (!shader)
+        {
+          ImGui::Text(
+              "%s",
+              fmt::format("Asset id '{}' was not type shader!", material->shader_asset).c_str());
+          material->shader_asset = "";
+          *valid = false;
+          return;
+        }
+        SetMaterialPropertiesFromShader(*shader->get(), material);
+        *last_data_write = std::chrono::system_clock::now();
+        GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+        *valid = true;
+      }
     }
     ImGui::EndTable();
   }
+
+  if (!*valid)
+    return;
 
   // Look up shader
   auto asset = m_state.m_user_data.m_asset_library->GetAssetFromID(material->shader_asset);
@@ -189,12 +193,10 @@ void MaterialControl::DrawImGui(VideoCommon::MaterialData* material,
     else
     {
       VideoCommon::PixelShaderData* shader_data = shader->get();
-      if (std::any_of(shader_data->m_properties.begin(), shader_data->m_properties.end(),
-                      [](const auto& pair) { return pair.first == ""; }))
+      if (!asset->m_valid)
       {
-        ImGui::Text("%s", fmt::format("The shader '{}' has invalid or incomplete properties!",
-                                      material->shader_asset)
-                              .c_str());
+        ImGui::Text("%s",
+                    fmt::format("The shader '{}' is invalid!", material->shader_asset).c_str());
       }
       else
       {
@@ -208,155 +210,138 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
                                   VideoCommon::MaterialData* material,
                                   VideoCommon::CustomAssetLibrary::TimeType* last_data_write)
 {
-  if (shader->m_properties.size() && ImGui::CollapsingHeader("Properties"))
+  if (ImGui::CollapsingHeader("Properties", ImGuiTreeNodeFlags_DefaultOpen))
   {
     if (ImGui::BeginTable("MaterialPropertiesForm", 2))
     {
-      material->properties.resize(shader->m_properties.size());
-      std::size_t property_index = 0;
-      for (const auto& [name, shader_property] : shader->m_properties)
+      std::size_t material_property_index = 0;
+      for (const auto& entry : shader->m_properties)
       {
+        // C++20: error with capturing structured bindings for our version of clang
+        const auto& name = entry.first;
+        const auto& shader_property = entry.second;
+
         ImGui::TableNextRow();
         ImGui::TableNextColumn();
         ImGui::Text("%s", name.c_str());
         ImGui::TableNextColumn();
 
-        auto& material_property = material->properties[property_index];
-        material_property.m_code_name = name;
-        switch (shader_property.m_type)
-        {
-        case VideoCommon::ShaderProperty::Type::Type_SamplerArrayShared_Main:
-        case VideoCommon::ShaderProperty::Type::Type_SamplerArrayShared_Additional:
-        case VideoCommon::ShaderProperty::Type::Type_Sampler2D:
-        {
-          material_property.m_type = VideoCommon::MaterialProperty::Type::Type_TextureAsset;
-          if (material_property.m_value)
-          {
-            auto& value = *material_property.m_value;
-            if (auto asset_id = std::get_if<VideoCommon::CustomAssetLibrary::AssetID>(&value))
-            {
-              if (AssetDisplay(material_property.m_code_name, &m_state, asset_id,
-                               AssetDataType::Texture))
-              {
-                *last_data_write = std::chrono::system_clock::now();
-                GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-              }
-            }
-          }
-          else
-          {
-            VideoCommon::CustomAssetLibrary::AssetID asset_id = "";
-            if (AssetDisplay(material_property.m_code_name, &m_state, &asset_id,
-                             AssetDataType::Texture))
-            {
-              *last_data_write = std::chrono::system_clock::now();
-              GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-              material_property.m_value = std::move(asset_id);
-            }
-          }
-        }
-        break;
-        case VideoCommon::ShaderProperty::Type::Type_Int:
-        {
-          material_property.m_type = VideoCommon::MaterialProperty::Type::Type_Int;
-          DrawNumericUniformControl<s32, 1, false>(material_property.m_code_name,
-                                                   &material_property.m_value, last_data_write);
-        }
-        break;
-        case VideoCommon::ShaderProperty::Type::Type_Int2:
-        {
-          material_property.m_type = VideoCommon::MaterialProperty::Type::Type_Int2;
-          DrawNumericUniformControl<s32, 2, false>(material_property.m_code_name,
-                                                   &material_property.m_value, last_data_write);
-        }
-        break;
-        case VideoCommon::ShaderProperty::Type::Type_Int3:
-        {
-          material_property.m_type = VideoCommon::MaterialProperty::Type::Type_Int3;
-          DrawNumericUniformControl<s32, 3, false>(material_property.m_code_name,
-                                                   &material_property.m_value, last_data_write);
-        }
-        break;
-        case VideoCommon::ShaderProperty::Type::Type_Int4:
-        {
-          material_property.m_type = VideoCommon::MaterialProperty::Type::Type_Int4;
-          DrawNumericUniformControl<s32, 4, false>(material_property.m_code_name,
-                                                   &material_property.m_value, last_data_write);
-        }
-        case VideoCommon::ShaderProperty::Type::Type_Float:
-        {
-          material_property.m_type = VideoCommon::MaterialProperty::Type::Type_Float;
-          DrawNumericUniformControl<float, 1, false>(material_property.m_code_name,
-                                                     &material_property.m_value, last_data_write);
-        }
-        break;
-        case VideoCommon::ShaderProperty::Type::Type_Float2:
-        {
-          material_property.m_type = VideoCommon::MaterialProperty::Type::Type_Float2;
-          DrawNumericUniformControl<float, 2, false>(material_property.m_code_name,
-                                                     &material_property.m_value, last_data_write);
-        }
-        break;
-        case VideoCommon::ShaderProperty::Type::Type_Float3:
-        {
-          material_property.m_type = VideoCommon::MaterialProperty::Type::Type_Float3;
-          DrawNumericUniformControl<float, 3, false>(material_property.m_code_name,
-                                                     &material_property.m_value, last_data_write);
-        }
-        break;
-        case VideoCommon::ShaderProperty::Type::Type_Float4:
-        {
-          material_property.m_type = VideoCommon::MaterialProperty::Type::Type_Float4;
-          DrawNumericUniformControl<float, 4, false>(material_property.m_code_name,
-                                                     &material_property.m_value, last_data_write);
-        }
-        break;
+        auto& material_property = material->properties[material_property_index];
 
-        case VideoCommon::ShaderProperty::Type::Type_RGBA:
-        {
-          material_property.m_type = VideoCommon::MaterialProperty::Type::Type_Float4;
-          DrawNumericUniformControl<float, 4, true>(material_property.m_code_name,
-                                                    &material_property.m_value, last_data_write);
-        }
-        break;
-        case VideoCommon::ShaderProperty::Type::Type_RGB:
-        {
-          material_property.m_type = VideoCommon::MaterialProperty::Type::Type_Float3;
-          DrawNumericUniformControl<float, 3, true>(material_property.m_code_name,
-                                                    &material_property.m_value, last_data_write);
-        }
-        break;
-        case VideoCommon::ShaderProperty::Type::Type_Bool:
-        {
-          material_property.m_type = VideoCommon::MaterialProperty::Type::Type_Bool;
-          if (material_property.m_value)
-          {
-            if (const auto val = std::get_if<bool>(&material_property.m_value.value()))
-            {
-              if (ImGui::Checkbox(fmt::format("##{}", name).c_str(), val))
-              {
-                *last_data_write = std::chrono::system_clock::now();
-                GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-              }
-            }
-          }
-          else
-          {
-            material_property.m_value = false;
-            if (const auto val = std::get_if<bool>(&material_property.m_value.value()))
-            {
-              if (ImGui::Checkbox(fmt::format("##{}", name).c_str(), val))
-              {
-                *last_data_write = std::chrono::system_clock::now();
-                GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-              }
-            }
-          }
-        }
-        break;
-        };
-
-        property_index++;
+        std::visit(
+            overloaded{
+                [&](VideoCommon::CustomAssetLibrary::AssetID& value) {
+                  if (AssetDisplay(material_property.m_code_name, &m_state, &value,
+                                   AssetDataType::Texture))
+                  {
+                    *last_data_write = std::chrono::system_clock::now();
+                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  }
+                },
+                [&](s32& value) {
+                  if (ImGui::InputInt(fmt::format("##{}", material_property.m_code_name).c_str(),
+                                      &value))
+                  {
+                    *last_data_write = std::chrono::system_clock::now();
+                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  }
+                },
+                [&](std::array<s32, 2>& value) {
+                  if (ImGui::InputInt2(fmt::format("##{}", material_property.m_code_name).c_str(),
+                                       value.data()))
+                  {
+                    *last_data_write = std::chrono::system_clock::now();
+                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  }
+                },
+                [&](std::array<s32, 3>& value) {
+                  if (ImGui::InputInt3(fmt::format("##{}", material_property.m_code_name).c_str(),
+                                       value.data()))
+                  {
+                    *last_data_write = std::chrono::system_clock::now();
+                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  }
+                },
+                [&](std::array<s32, 4>& value) {
+                  if (ImGui::InputInt4(fmt::format("##{}", material_property.m_code_name).c_str(),
+                                       value.data()))
+                  {
+                    *last_data_write = std::chrono::system_clock::now();
+                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  }
+                },
+                [&](float& value) {
+                  if (ImGui::InputFloat(fmt::format("##{}", material_property.m_code_name).c_str(),
+                                        &value))
+                  {
+                    *last_data_write = std::chrono::system_clock::now();
+                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  }
+                },
+                [&](std::array<float, 2>& value) {
+                  if (ImGui::InputFloat2(fmt::format("##{}", material_property.m_code_name).c_str(),
+                                         value.data()))
+                  {
+                    *last_data_write = std::chrono::system_clock::now();
+                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  }
+                },
+                [&](std::array<float, 3>& value) {
+                  if (std::holds_alternative<VideoCommon::ShaderProperty::RGB>(
+                          shader_property.m_default))
+                  {
+                    if (ImGui::ColorEdit3(
+                            fmt::format("##{}", material_property.m_code_name).c_str(),
+                            value.data()))
+                    {
+                      *last_data_write = std::chrono::system_clock::now();
+                      GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                    }
+                  }
+                  else
+                  {
+                    if (ImGui::InputFloat3(
+                            fmt::format("##{}", material_property.m_code_name).c_str(),
+                            value.data()))
+                    {
+                      *last_data_write = std::chrono::system_clock::now();
+                      GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                    }
+                  }
+                },
+                [&](std::array<float, 4>& value) {
+                  if (std::holds_alternative<VideoCommon::ShaderProperty::RGBA>(
+                          shader_property.m_default))
+                  {
+                    if (ImGui::ColorEdit4(
+                            fmt::format("##{}", material_property.m_code_name).c_str(),
+                            value.data()))
+                    {
+                      *last_data_write = std::chrono::system_clock::now();
+                      GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                    }
+                  }
+                  else
+                  {
+                    if (ImGui::InputFloat4(
+                            fmt::format("##{}", material_property.m_code_name).c_str(),
+                            value.data()))
+                    {
+                      *last_data_write = std::chrono::system_clock::now();
+                      GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                    }
+                  }
+                },
+                [&](bool& value) {
+                  if (ImGui::Checkbox(fmt::format("##{}", material_property.m_code_name).c_str(),
+                                      &value))
+                  {
+                    *last_data_write = std::chrono::system_clock::now();
+                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  }
+                }},
+            material_property.m_value);
+        material_property_index++;
       }
       ImGui::EndTable();
     }

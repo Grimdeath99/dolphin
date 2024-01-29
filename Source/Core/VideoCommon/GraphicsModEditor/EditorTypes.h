@@ -9,41 +9,69 @@
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
 
 #include "Common/CommonTypes.h"
+
 #include "VideoCommon/AbstractTexture.h"
 #include "VideoCommon/Assets/CustomAssetLibrary.h"
 #include "VideoCommon/Assets/CustomTextureData.h"
 #include "VideoCommon/Assets/DirectFilesystemAssetLibrary.h"
 #include "VideoCommon/Assets/MaterialAsset.h"
+#include "VideoCommon/Assets/MeshAsset.h"
 #include "VideoCommon/Assets/ShaderAsset.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/FBInfo.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModAction.h"
+#include "VideoCommon/GraphicsModSystem/Types.h"
 #include "VideoCommon/XFMemory.h"
 
 namespace GraphicsModEditor
 {
-struct DrawCallID
-{
-  // Right now ID is just the texture, in the future
-  // the ID will be composed of other data as well (position, mesh details, etc?)
-  std::string GetID() const { return m_texture_hash; }
-  std::string m_texture_hash;
-
-  // Explicitly provide comparison category because some compilers
-  // haven't written string operator<=>
-  std::strong_ordering operator<=>(const DrawCallID&) const = default;
-};
-
 struct DrawCallData
 {
-  std::chrono::steady_clock::time_point m_time;
+  std::chrono::steady_clock::time_point m_create_time;
+  std::chrono::steady_clock::time_point m_last_update_time;
   ProjectionType m_projection_type;
-  AbstractTexture* m_texture;
-  DrawCallID m_id;
+  CullMode m_cull_mode;
+
+  struct TextureDetails
+  {
+    AbstractTexture* m_texture;
+    std::string_view m_hash;
+    u32 m_texture_unit;
+  };
+  std::vector<TextureDetails> m_textures_details;
+  GraphicsMods::DrawCallID m_id;
+
+  // Blending
+  bool m_blendenable;
+  bool m_logicopenable;
+  bool m_dither;
+  bool m_colorupdate;
+  bool m_alphaupdate;
+  DstBlendFactor m_dstfactor;
+  SrcBlendFactor m_srcfactor;
+  bool m_subtract;
+  LogicOp m_logicmode;
+
+  // Transform
+  std::array<float, 4> m_world_position;
+};
+
+struct LightData
+{
+  GraphicsMods::LightID m_id;
+  std::chrono::steady_clock::time_point m_create_time;
+  std::chrono::steady_clock::time_point m_last_update_time;
+
+  int4 m_color;
+  float4 m_cosatt;
+  float4 m_distatt;
+  float4 m_pos;
+  float4 m_dir;
 };
 
 struct FBCallData
@@ -63,12 +91,19 @@ struct FBCallUserData
   std::string m_friendly_name;
 };
 
-using EditorAssetData = std::variant<std::unique_ptr<VideoCommon::MaterialData>,
-                                     std::unique_ptr<VideoCommon::PixelShaderData>,
-                                     std::unique_ptr<VideoCommon::TextureData>>;
+struct LightUserData
+{
+  std::string m_friendly_name;
+};
+
+using EditorAssetData =
+    std::variant<std::unique_ptr<VideoCommon::MaterialData>,
+                 std::unique_ptr<VideoCommon::PixelShaderData>,
+                 std::unique_ptr<VideoCommon::TextureData>, std::unique_ptr<VideoCommon::MeshData>>;
 enum AssetDataType
 {
   Material,
+  Mesh,
   PixelShader,
   Texture
 };
@@ -80,9 +115,11 @@ struct EditorAsset
   AssetDataType m_data_type;
   VideoCommon::CustomAssetLibrary::TimeType m_last_data_write;
   VideoCommon::DirectFilesystemAssetLibrary::AssetMap m_asset_map;
+  bool m_valid = false;
 };
 
-using SelectableType = std::variant<DrawCallID, FBInfo, GraphicsModAction*, EditorAsset*>;
+using SelectableType = std::variant<GraphicsMods::DrawCallID, FBInfo, GraphicsMods::LightID,
+                                    GraphicsModAction*, EditorAsset*>;
 
 class EditorAction final : public GraphicsModAction
 {
@@ -122,6 +159,11 @@ public:
   {
     if (m_active)
       m_action->OnTextureCreate(texture_create);
+  }
+  void OnLight(GraphicsModActionData::Light* light) override
+  {
+    if (m_active)
+      m_action->OnLight(light);
   }
   void OnFrameEnd() override
   {

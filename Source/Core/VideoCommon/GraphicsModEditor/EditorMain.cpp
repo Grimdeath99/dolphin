@@ -4,8 +4,10 @@
 #include "VideoCommon/GraphicsModEditor/EditorMain.h"
 
 #include <filesystem>
+#include <fstream>
 
 #include <fmt/format.h>
+#include <imgui.h>
 
 #include "Common/CommonPaths.h"
 #include "Common/FileUtil.h"
@@ -16,6 +18,7 @@
 #include "VideoCommon/AbstractTexture.h"
 #include "VideoCommon/Assets/CustomAssetLoader.h"
 #include "VideoCommon/Assets/CustomTextureData.h"
+#include "VideoCommon/GraphicsModEditor/Controls/MeshExtractWindow.h"
 #include "VideoCommon/GraphicsModEditor/EditorEvents.h"
 #include "VideoCommon/GraphicsModEditor/EditorState.h"
 #include "VideoCommon/GraphicsModEditor/EditorTypes.h"
@@ -24,6 +27,7 @@
 #include "VideoCommon/GraphicsModEditor/Panels/PropertiesPanel.h"
 #include "VideoCommon/GraphicsModSystem/Config/GraphicsMod.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/Actions/CustomPipelineAction.h"
+#include "VideoCommon/GraphicsModSystem/Runtime/Actions/ModifyLight.h"
 #include "VideoCommon/HiresTextures.h"
 #include "VideoCommon/TextureCacheBase.h"
 #include "VideoCommon/VideoConfig.h"
@@ -41,7 +45,8 @@ bool AddTextureToResources(const std::string& texture_path, const std::string& n
     return false;
   }
 
-  TextureConfig tex_config(level.width, level.height, 1, 1, 1, AbstractTextureFormat::RGBA8, 0);
+  TextureConfig tex_config(level.width, level.height, 1, 1, 1, AbstractTextureFormat::RGBA8, 0,
+                           AbstractTextureType::Texture_2DArray);
   auto editor_tex = g_gfx->CreateTexture(tex_config, name);
   if (!editor_tex)
   {
@@ -115,7 +120,7 @@ void EditorMain::DrawImGui()
   }
   else
   {
-    ImGui::ShowDemoWindow();
+    // ImGui::ShowDemoWindow();
   }
 }
 
@@ -129,27 +134,14 @@ void EditorMain::AddFBCall(FBCallData fb_call)
   m_active_targets_panel->AddFBCall(std::move(fb_call));
 }
 
+void EditorMain::AddLightData(LightData light_data)
+{
+  m_active_targets_panel->AddLightData(std::move(light_data));
+}
+
 const std::vector<GraphicsModAction*>&
 EditorMain::GetProjectionActions(ProjectionType projection_type) const
 {
-  const OperationAndDrawCallID::Operation operation =
-      projection_type == ProjectionType::Orthographic ?
-          OperationAndDrawCallID::Operation::Projection2D :
-          OperationAndDrawCallID::Operation::Projection3D;
-  OperationAndDrawCallID lookup{operation, DrawCallID{}};
-  if (const auto it = m_state->m_user_data.m_operation_and_draw_call_id_to_actions.find(lookup);
-      it != m_state->m_user_data.m_operation_and_draw_call_id_to_actions.end())
-  {
-    return it->second;
-  }
-
-  // If we can't find it in the user actions, look in the editor actions
-  if (const auto it = m_state->m_editor_data.m_operation_and_draw_call_id_to_actions.find(lookup);
-      it != m_state->m_editor_data.m_operation_and_draw_call_id_to_actions.end())
-  {
-    return it->second;
-  }
-
   return m_empty_actions;
 }
 
@@ -157,32 +149,14 @@ const std::vector<GraphicsModAction*>&
 EditorMain::GetProjectionTextureActions(ProjectionType projection_type,
                                         const std::string& texture_name) const
 {
-  const OperationAndDrawCallID::Operation operation =
-      projection_type == ProjectionType::Orthographic ?
-          OperationAndDrawCallID::Operation::Projection2D :
-          OperationAndDrawCallID::Operation::Projection3D;
-  OperationAndDrawCallID lookup{operation, DrawCallID{texture_name}};
-  if (const auto it = m_state->m_user_data.m_operation_and_draw_call_id_to_actions.find(lookup);
-      it != m_state->m_user_data.m_operation_and_draw_call_id_to_actions.end())
-  {
-    return it->second;
-  }
-
-  // If we can't find it in the user actions, look in the editor actions
-  if (const auto it = m_state->m_editor_data.m_operation_and_draw_call_id_to_actions.find(lookup);
-      it != m_state->m_editor_data.m_operation_and_draw_call_id_to_actions.end())
-  {
-    return it->second;
-  }
-
   return m_empty_actions;
 }
 
 const std::vector<GraphicsModAction*>&
-EditorMain::GetDrawStartedActions(const std::string& texture_name) const
+EditorMain::GetDrawStartedActions(GraphicsMods::DrawCallID draw_call_id) const
 {
   const OperationAndDrawCallID::Operation operation = OperationAndDrawCallID::Operation::Draw;
-  OperationAndDrawCallID lookup{operation, DrawCallID{texture_name}};
+  OperationAndDrawCallID lookup{operation, draw_call_id};
 
   if (const auto it = m_state->m_editor_data.m_operation_and_draw_call_id_to_actions.find(lookup);
       it != m_state->m_editor_data.m_operation_and_draw_call_id_to_actions.end())
@@ -194,14 +168,6 @@ EditorMain::GetDrawStartedActions(const std::string& texture_name) const
       it != m_state->m_user_data.m_operation_and_draw_call_id_to_actions.end())
   {
     return it->second;
-  }
-
-  for (const auto& [fb, actions] : m_state->m_editor_data.m_fb_call_id_to_actions)
-  {
-    const auto texture_hash = fmt::format("efb1_{}x{}_{}", fb.m_width, fb.m_height,
-                                          static_cast<int>(fb.m_texture_format));
-    if (texture_hash == texture_name)
-      return actions;
   }
 
   return m_empty_actions;
@@ -210,21 +176,7 @@ EditorMain::GetDrawStartedActions(const std::string& texture_name) const
 const std::vector<GraphicsModAction*>&
 EditorMain::GetTextureLoadActions(const std::string& texture_name) const
 {
-  const OperationAndDrawCallID::Operation operation =
-      OperationAndDrawCallID::Operation::TextureLoad;
-  OperationAndDrawCallID lookup{operation, DrawCallID{texture_name}};
-
-  if (const auto it = m_state->m_editor_data.m_operation_and_draw_call_id_to_actions.find(lookup);
-      it != m_state->m_editor_data.m_operation_and_draw_call_id_to_actions.end())
-  {
-    return it->second;
-  }
-
-  if (const auto it = m_state->m_user_data.m_operation_and_draw_call_id_to_actions.find(lookup);
-      it != m_state->m_user_data.m_operation_and_draw_call_id_to_actions.end())
-  {
-    return it->second;
-  }
+  // TODO
 
   return m_empty_actions;
 }
@@ -232,21 +184,7 @@ EditorMain::GetTextureLoadActions(const std::string& texture_name) const
 const std::vector<GraphicsModAction*>&
 EditorMain::GetTextureCreateActions(const std::string& texture_name) const
 {
-  const OperationAndDrawCallID::Operation operation =
-      OperationAndDrawCallID::Operation::TextureCreate;
-  OperationAndDrawCallID lookup{operation, DrawCallID{texture_name}};
-
-  if (const auto it = m_state->m_editor_data.m_operation_and_draw_call_id_to_actions.find(lookup);
-      it != m_state->m_editor_data.m_operation_and_draw_call_id_to_actions.end())
-  {
-    return it->second;
-  }
-
-  if (const auto it = m_state->m_user_data.m_operation_and_draw_call_id_to_actions.find(lookup);
-      it != m_state->m_user_data.m_operation_and_draw_call_id_to_actions.end())
-  {
-    return it->second;
-  }
+  // TODO
 
   return m_empty_actions;
 }
@@ -261,6 +199,24 @@ const std::vector<GraphicsModAction*>& EditorMain::GetEFBActions(const FBInfo& f
 
   if (const auto it = m_state->m_user_data.m_fb_call_id_to_reference_actions.find(fb);
       it != m_state->m_user_data.m_fb_call_id_to_reference_actions.end())
+  {
+    return it->second;
+  }
+
+  return m_empty_actions;
+}
+
+const std::vector<GraphicsModAction*>&
+EditorMain::GetLightActions(GraphicsMods::LightID light_id) const
+{
+  if (const auto it = m_state->m_editor_data.m_light_id_to_actions.find(light_id);
+      it != m_state->m_editor_data.m_light_id_to_actions.end())
+  {
+    return it->second;
+  }
+
+  if (const auto it = m_state->m_user_data.m_light_id_to_reference_actions.find(light_id);
+      it != m_state->m_user_data.m_light_id_to_reference_actions.end())
   {
     return it->second;
   }
@@ -377,6 +333,9 @@ bool EditorMain::RebuildState()
   m_state->m_editor_data.m_highlight_action = std::make_unique<CustomPipelineAction>(
       m_state->m_editor_data.m_asset_library, std::move(passes));
 
+  m_state->m_editor_data.m_highlight_light_action = std::make_unique<ModifyLightAction>(
+      float4{0, 0, 1, 0}, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
+
   return true;
 }
 
@@ -393,7 +352,7 @@ void EditorMain::DrawMenu()
         {
           new_mod_popup = true;
         }
-        else if (ImGui::MenuItem("Inspect Only"))
+        if (ImGui::MenuItem("Inspect Only"))
         {
           m_editor_session_in_progress = true;
           m_inspect_only = true;
@@ -439,8 +398,32 @@ void EditorMain::DrawMenu()
 
       ImGui::EndMenu();
     }
+    if (ImGui::BeginMenu("Scene"))
+    {
+      if (ImGui::MenuItem("Export Scene As Mesh", nullptr, false, m_editor_session_in_progress))
+      {
+        if (!m_open_mesh_dump_export_window)
+        {
+          for (const auto& [draw_call_id, data] : m_state->m_runtime_data.m_draw_call_id_to_data)
+          {
+            m_last_mesh_dump_request.m_draw_call_ids.insert(draw_call_id);
+          }
+        }
+        m_open_mesh_dump_export_window = true;
+      }
+      ImGui::EndMenu();
+    }
 
     ImGui::EndMainMenuBar();
+  }
+
+  if (m_open_mesh_dump_export_window && m_state)
+  {
+    if (Controls::ShowMeshExtractWindow(m_state->m_scene_dumper, m_last_mesh_dump_request))
+    {
+      m_open_mesh_dump_export_window = false;
+      m_last_mesh_dump_request = {};
+    }
   }
 
   const std::string_view new_graphics_mod_popup_name = "New Graphics Mod";
@@ -574,9 +557,13 @@ bool EditorMain::LoadMod(std::string_view name)
   auto& loader = system.GetCustomAssetLoader();
   for (const auto& asset : config->m_assets)
   {
-    m_state->m_editor_data.m_assets_waiting_for_preview.try_emplace(
-        asset.m_asset_id,
-        loader.LoadGameTexture(asset.m_asset_id, m_state->m_user_data.m_asset_library));
+    // TODO: generate preview for other types?
+    if (asset.m_map.find("texture") != asset.m_map.end())
+    {
+      m_state->m_editor_data.m_assets_waiting_for_preview.try_emplace(
+          asset.m_asset_id,
+          loader.LoadGameTexture(asset.m_asset_id, m_state->m_user_data.m_asset_library));
+    }
   }
 
   m_state->m_user_data.m_current_mod_path = mod_path;
@@ -610,7 +597,7 @@ void EditorMain::Save()
   WriteToGraphicsMod(m_state->m_user_data, &mod);
 
   picojson::object serialized_root;
-  mod.SerializeToConfig(&serialized_root);
+  mod.SerializeToConfig(serialized_root);
 
   const auto output = picojson::value{serialized_root}.serialize(true);
   json_stream << output;
@@ -637,5 +624,15 @@ void EditorMain::OnChangeOccured()
 EditorState* EditorMain::GetEditorState() const
 {
   return m_state.get();
+}
+
+SceneDumper* EditorMain::GetSceneDumper() const
+{
+  if (m_state) [[likely]]
+  {
+    return &m_state->m_scene_dumper;
+  }
+
+  return nullptr;
 }
 }  // namespace GraphicsModEditor

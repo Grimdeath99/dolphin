@@ -112,13 +112,8 @@ std::string GraphicsModConfig::GetAbsolutePath() const
   }
 }
 
-void GraphicsModConfig::SerializeToConfig(picojson::object* obj) const
+void GraphicsModConfig::SerializeToConfig(picojson::object& json_obj) const
 {
-  if (!obj) [[unlikely]]
-    return;
-
-  auto& json_obj = *obj;
-
   picojson::object serialized_metadata;
   serialized_metadata["title"] = picojson::value{m_title};
   serialized_metadata["author"] = picojson::value{m_author};
@@ -129,7 +124,7 @@ void GraphicsModConfig::SerializeToConfig(picojson::object* obj) const
   for (const auto& group : m_groups)
   {
     picojson::object serialized_group;
-    group.SerializeToConfig(&serialized_group);
+    group.SerializeToConfig(serialized_group);
     serialized_groups.push_back(picojson::value{serialized_group});
   }
   json_obj["groups"] = picojson::value{serialized_groups};
@@ -138,7 +133,7 @@ void GraphicsModConfig::SerializeToConfig(picojson::object* obj) const
   for (const auto& feature : m_features)
   {
     picojson::object serialized_feature;
-    feature.SerializeToConfig(&serialized_feature);
+    feature.SerializeToConfig(serialized_feature);
     serialized_features.push_back(picojson::value{serialized_feature});
   }
   json_obj["features"] = picojson::value{serialized_features};
@@ -147,7 +142,7 @@ void GraphicsModConfig::SerializeToConfig(picojson::object* obj) const
   for (const auto& asset : m_assets)
   {
     picojson::object serialized_asset;
-    asset.SerializeToConfig(&serialized_asset);
+    asset.SerializeToConfig(serialized_asset);
     serialized_assets.push_back(picojson::value{serialized_asset});
   }
   json_obj["assets"] = picojson::value{serialized_assets};

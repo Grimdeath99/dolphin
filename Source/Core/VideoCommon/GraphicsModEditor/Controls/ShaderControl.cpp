@@ -11,7 +11,10 @@
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
 
+#include "Common/VariantUtil.h"
+
 #include "VideoCommon/Assets/ShaderAsset.h"
+#include "VideoCommon/GraphicsModEditor/Controls/AssetDisplay.h"
 #include "VideoCommon/GraphicsModEditor/EditorEvents.h"
 
 namespace GraphicsModEditor::Controls
@@ -20,78 +23,200 @@ ShaderControl::ShaderControl(EditorState& state) : m_state(state)
 {
 }
 
-void ShaderControl::DrawImGui(VideoCommon::PixelShaderData* shader,
+void ShaderControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& asset_id,
+                              VideoCommon::PixelShaderData* shader,
                               VideoCommon::CustomAssetLibrary::TimeType* last_data_write)
 {
   if (ImGui::BeginTable("ShaderForm", 2))
   {
-    std::map<std::string, std::string> name_rename;
-    for (auto& pair : shader->m_properties)
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("ID");
+    ImGui::TableNextColumn();
+    ImGui::Text("%s", asset_id.c_str());
+
+    ImGui::EndTable();
+  }
+
+  if (ImGui::CollapsingHeader("Properties", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    for (auto& entry : shader->m_properties)
     {
-      std::string name = pair.first;
-      auto& property = pair.second;
-      ImGui::TableNextRow();
-      ImGui::TableNextColumn();
-      ImGui::Text("Name");
-      ImGui::TableNextColumn();
-      ImGui::InputText(fmt::format("##{}Name", pair.first).c_str(), &name);
+      // C++20: error with capturing structured bindings for our version of clang
+      auto& name = entry.first;
+      auto& property = entry.second;
 
-      if (name != pair.first)
+      ImGui::Text("%s", name.c_str());
+      ImGui::SameLine();
+      // TODO Button for editing description
+      ImGui::SameLine();
+      std::visit(
+          overloaded{
+              [&](VideoCommon::ShaderProperty::Sampler2D& default_value) {
+                if (AssetDisplay(name, &m_state, &default_value.value, AssetDataType::Texture))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              },
+              [&](VideoCommon::ShaderProperty::Sampler2DArray& default_value) {
+                if (AssetDisplay(name, &m_state, &default_value.value, AssetDataType::Texture))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              },
+              [&](VideoCommon::ShaderProperty::SamplerCube& default_value) {
+                if (AssetDisplay(name, &m_state, &default_value.value, AssetDataType::Texture))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              },
+              [&](s32& default_value) {
+                if (ImGui::InputInt(fmt::format("##{}", name).c_str(), &default_value))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              },
+              [&](std::array<s32, 2>& default_value) {
+                if (ImGui::InputInt2(fmt::format("##{}", name).c_str(), default_value.data()))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              },
+              [&](std::array<s32, 3>& default_value) {
+                if (ImGui::InputInt3(fmt::format("##{}", name).c_str(), default_value.data()))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              },
+              [&](std::array<s32, 4>& default_value) {
+                if (ImGui::InputInt4(fmt::format("##{}", name).c_str(), default_value.data()))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              },
+              [&](float& default_value) {
+                if (ImGui::InputFloat(fmt::format("##{}", name).c_str(), &default_value))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              },
+              [&](std::array<float, 2>& default_value) {
+                if (ImGui::InputFloat2(fmt::format("##{}", name).c_str(), default_value.data()))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              },
+              [&](std::array<float, 3>& default_value) {
+                if (ImGui::InputFloat3(fmt::format("##{}", name).c_str(), default_value.data()))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              },
+              [&](std::array<float, 4>& default_value) {
+                if (ImGui::InputFloat4(fmt::format("##{}", name).c_str(), default_value.data()))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              },
+              [&](VideoCommon::ShaderProperty::RGB& default_value) {
+                if (ImGui::ColorEdit3(fmt::format("##{}", name).c_str(),
+                                      default_value.value.data()))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              },
+              [&](VideoCommon::ShaderProperty::RGBA& default_value) {
+                if (ImGui::ColorEdit4(fmt::format("##{}", name).c_str(),
+                                      default_value.value.data()))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              },
+              [&](bool& default_value) {
+                if (ImGui::Checkbox(fmt::format("##{}", name).c_str(), &default_value))
+                {
+                  *last_data_write = std::chrono::system_clock::now();
+                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                }
+              }},
+          property.m_default);
+      ImGui::SameLine();
+      if (ImGui::Button("X"))
       {
-        name_rename.try_emplace(pair.first, std::move(name));
-      }
-
-      ImGui::TableNextRow();
-      ImGui::TableNextColumn();
-      ImGui::Text("Description");
-      ImGui::TableNextColumn();
-      ImGui::InputText(fmt::format("##{}Desc", pair.first).c_str(), &property.m_description);
-
-      ImGui::TableNextRow();
-      ImGui::TableNextColumn();
-      ImGui::Text("Type");
-      ImGui::TableNextColumn();
-      if (ImGui::BeginCombo(fmt::format("##{}Type", pair.first).c_str(),
-                            fmt::to_string(property.m_type).c_str()))
-      {
-        for (auto e = VideoCommon::ShaderProperty::Type::Type_Undefined;
-             e <= VideoCommon::ShaderProperty::Type::Type_Max;
-             e = static_cast<VideoCommon::ShaderProperty::Type>(static_cast<u32>(e) + 1))
-        {
-          if (e == VideoCommon::ShaderProperty::Type::Type_Undefined)
-          {
-            continue;
-          }
-
-          const bool is_selected = property.m_type == e;
-          if (ImGui::Selectable(fmt::to_string(e).c_str(), is_selected))
-          {
-            property.m_type = e;
-            *last_data_write = std::chrono::system_clock::now();
-            GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
-          }
-        }
-        ImGui::EndCombo();
-      }
-
-      for (const auto& [old_name, new_name] : name_rename)
-      {
-        auto shader_prop = shader->m_properties.extract(old_name);
-        if (shader_prop)
-        {
-          shader_prop.key() = new_name;
-          shader->m_properties.insert(std::move(shader_prop));
-        }
+        shader->m_properties.erase(name);
       }
     }
-    ImGui::EndTable();
+
+    ImGui::Separator();
 
     if (ImGui::Button("Add"))
     {
-      shader->m_properties.try_emplace(fmt::format("Prop{}", shader->m_properties.size()),
-                                       VideoCommon::ShaderProperty{});
-      *last_data_write = std::chrono::system_clock::now();
-      GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+      m_add_property_name = "";
+      m_add_property_chosen_type = "";
+      m_add_property_data = {};
+      ImGui::OpenPopup("AddShaderPropPopup");
+    }
+
+    if (ImGui::BeginPopupModal("AddShaderPropPopup", nullptr))
+    {
+      if (ImGui::BeginTable("AddShaderPropForm", 2))
+      {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::Text("Name");
+        ImGui::TableNextColumn();
+        ImGui::InputText("##PropName", &m_add_property_name);
+
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::Text("Type");
+        ImGui::TableNextColumn();
+
+        if (ImGui::BeginCombo("##PropType", m_add_property_chosen_type.c_str()))
+        {
+          for (const auto& type : VideoCommon::ShaderProperty::GetValueTypeNames())
+          {
+            const bool is_selected = type == m_add_property_chosen_type;
+            if (ImGui::Selectable(type.data(), is_selected))
+            {
+              m_add_property_chosen_type = type;
+              m_add_property_data = VideoCommon::ShaderProperty::GetDefaultValueFromTypeName(type);
+            }
+          }
+          ImGui::EndCombo();
+        }
+
+        ImGui::EndTable();
+      }
+      if (ImGui::Button("Add"))
+      {
+        VideoCommon::ShaderProperty shader_property;
+        shader_property.m_description = "";
+        shader_property.m_default = m_add_property_data;
+        shader->m_properties.insert_or_assign(m_add_property_name, std::move(shader_property));
+        *last_data_write = std::chrono::system_clock::now();
+        GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+        ImGui::CloseCurrentPopup();
+      }
+      ImGui::SameLine();
+      if (ImGui::Button("Cancel"))
+      {
+        ImGui::CloseCurrentPopup();
+      }
+      ImGui::EndPopup();
     }
   }
 }

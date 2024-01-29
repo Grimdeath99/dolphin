@@ -18,8 +18,9 @@ class MaterialControl
 {
 public:
   explicit MaterialControl(EditorState& state);
-  void DrawImGui(VideoCommon::MaterialData* material,
-                 VideoCommon::CustomAssetLibrary::TimeType* last_data_write);
+  void DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& asset_id,
+                 VideoCommon::MaterialData* material,
+                 VideoCommon::CustomAssetLibrary::TimeType* last_data_write, bool* valid);
 
 private:
   void DrawControl(VideoCommon::PixelShaderData* shader, VideoCommon::MaterialData* material,

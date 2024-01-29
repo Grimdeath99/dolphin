@@ -6,11 +6,8 @@
 #include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
 
-void GraphicsModAssetConfig::SerializeToConfig(picojson::object* obj) const
+void GraphicsModAssetConfig::SerializeToConfig(picojson::object& json_obj) const
 {
-  if (!obj) [[unlikely]]
-    return;
-  auto& json_obj = *obj;
   json_obj["name"] = picojson::value{m_asset_id};
 
   picojson::object serialized_data;

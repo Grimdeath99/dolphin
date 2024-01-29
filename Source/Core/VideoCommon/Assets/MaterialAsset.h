@@ -4,7 +4,6 @@
 #pragma once
 
 #include <array>
-#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
@@ -21,31 +20,14 @@ namespace VideoCommon
 {
 struct MaterialProperty
 {
-  static constexpr std::size_t MemorySize = sizeof(float) * 4;
   static void WriteToMemory(u8*& buffer, const MaterialProperty& property);
   static std::size_t GetMemorySize(const MaterialProperty& property);
   static void WriteAsShaderCode(ShaderCode& shader_source, const MaterialProperty& property);
   using Value = std::variant<CustomAssetLibrary::AssetID, s32, std::array<s32, 2>,
                              std::array<s32, 3>, std::array<s32, 4>, float, std::array<float, 2>,
                              std::array<float, 3>, std::array<float, 4>, bool>;
-  enum class Type
-  {
-    Type_Undefined,
-    Type_TextureAsset,
-    Type_Int,
-    Type_Int2,
-    Type_Int3,
-    Type_Int4,
-    Type_Float,
-    Type_Float2,
-    Type_Float3,
-    Type_Float4,
-    Type_Bool,
-    Type_Max = Type_Bool
-  };
   std::string m_code_name;
-  Type m_type = Type::Type_Undefined;
-  std::optional<Value> m_value;
+  Value m_value;
 };
 
 struct MaterialData
@@ -55,6 +37,18 @@ struct MaterialData
   static void ToJson(picojson::object* obj, const MaterialData& data);
   std::string shader_asset;
   std::vector<MaterialProperty> properties;
+
+  enum BlendMode
+  {
+    Opaque,
+    Mask,
+    Blend
+  };
+  BlendMode blend_mode;
+
+  // If true, indicates the object should be rendered without backface culling
+  // and that the normals on the backface should be flipped
+  bool double_sided = false;
 };
 
 // Much like Unity and Unreal materials, a Dolphin material does very little on its own
@@ -71,14 +65,3 @@ private:
 };
 
 }  // namespace VideoCommon
-
-template <>
-struct fmt::formatter<VideoCommon::MaterialProperty::Type>
-    : EnumFormatter<VideoCommon::MaterialProperty::Type::Type_Max>
-{
-  constexpr formatter()
-      : EnumFormatter({"Undefined", "Texture", "Int", "Int2", "Int3", "Int4", "Float", "Float2",
-                       "Float3", "Float4", "Bool"})
-  {
-  }
-};
