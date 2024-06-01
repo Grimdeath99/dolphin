@@ -95,6 +95,11 @@ QGroupBox* MappingWidget::CreateGroupBox(const QString& name, ControllerEmu::Con
     indicator = new AnalogStickIndicator(*static_cast<ControllerEmu::ReshapableInput*>(group));
     break;
 
+  case ControllerEmu::GroupType::IRPassthrough:
+    indicator =
+        new IRPassthroughMappingIndicator(*static_cast<ControllerEmu::IRPassthrough*>(group));
+    break;
+
   default:
     break;
   }
@@ -326,6 +331,9 @@ MappingWidget::CreateSettingAdvancedMappingButton(ControllerEmu::NumericSettingB
   button->connect(button, &QPushButton::clicked, [this, &setting]() {
     if (setting.IsSimpleValue())
       setting.SetExpressionFromValue();
+
+    // Ensure the UI has the game-controller indicator while editing the expression.
+    ConfigChanged();
 
     IOWindow io(this, GetController(), &setting.GetInputReference(), IOWindow::Type::Input);
     SetQWidgetWindowDecorations(&io);

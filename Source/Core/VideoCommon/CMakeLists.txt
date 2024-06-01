@@ -74,12 +74,18 @@ add_library(videocommon
   GraphicsModEditor/Controls/MeshExtractWindow.h
   GraphicsModEditor/Controls/MeshImportWindow.cpp
   GraphicsModEditor/Controls/MeshImportWindow.h
+  GraphicsModEditor/Controls/MiscControls.cpp
+  GraphicsModEditor/Controls/MiscControls.h
   GraphicsModEditor/Controls/ShaderControl.cpp
   GraphicsModEditor/Controls/ShaderControl.h
+  GraphicsModEditor/Controls/TagSelectionWindow.cpp
+  GraphicsModEditor/Controls/TagSelectionWindow.h
   GraphicsModEditor/Controls/TextureControl.cpp
   GraphicsModEditor/Controls/TextureControl.h
   GraphicsModEditor/EditorAssetSource.cpp
   GraphicsModEditor/EditorAssetSource.h
+  GraphicsModEditor/EditorBackend.cpp
+  GraphicsModEditor/EditorBackend.h
   GraphicsModEditor/EditorEvents.h
   GraphicsModEditor/EditorMain.cpp
   GraphicsModEditor/EditorMain.h
@@ -96,16 +102,18 @@ add_library(videocommon
   GraphicsModEditor/SceneDumper.h
   GraphicsModSystem/Config/GraphicsMod.cpp
   GraphicsModSystem/Config/GraphicsMod.h
+  GraphicsModSystem/Config/GraphicsModAction.cpp
+  GraphicsModSystem/Config/GraphicsModAction.h
   GraphicsModSystem/Config/GraphicsModAsset.cpp
   GraphicsModSystem/Config/GraphicsModAsset.h
-  GraphicsModSystem/Config/GraphicsModFeature.cpp
-  GraphicsModSystem/Config/GraphicsModFeature.h
   GraphicsModSystem/Config/GraphicsModGroup.cpp
   GraphicsModSystem/Config/GraphicsModGroup.h
+  GraphicsModSystem/Config/GraphicsModHashPolicy.cpp
+  GraphicsModSystem/Config/GraphicsModHashPolicy.h
+  GraphicsModSystem/Config/GraphicsModTag.cpp
+  GraphicsModSystem/Config/GraphicsModTag.h
   GraphicsModSystem/Config/GraphicsTarget.cpp
   GraphicsModSystem/Config/GraphicsTarget.h
-  GraphicsModSystem/Config/GraphicsTargetGroup.cpp
-  GraphicsModSystem/Config/GraphicsTargetGroup.h
   GraphicsModSystem/Constants.h
   GraphicsModSystem/Runtime/Actions/CustomMeshAction.cpp
   GraphicsModSystem/Runtime/Actions/CustomMeshAction.h
@@ -121,6 +129,8 @@ add_library(videocommon
   GraphicsModSystem/Runtime/Actions/ScaleAction.h
   GraphicsModSystem/Runtime/Actions/SkipAction.cpp
   GraphicsModSystem/Runtime/Actions/SkipAction.h
+  GraphicsModSystem/Runtime/Actions/TransformAction.cpp
+  GraphicsModSystem/Runtime/Actions/TransformAction.h
   GraphicsModSystem/Runtime/CustomPipeline.cpp
   GraphicsModSystem/Runtime/CustomPipeline.h
   GraphicsModSystem/Runtime/CustomShaderCache.cpp
@@ -131,8 +141,14 @@ add_library(videocommon
   GraphicsModSystem/Runtime/GraphicsModActionData.h
   GraphicsModSystem/Runtime/GraphicsModActionFactory.cpp
   GraphicsModSystem/Runtime/GraphicsModActionFactory.h
+  GraphicsModSystem/Runtime/GraphicsModBackend.cpp
+  GraphicsModSystem/Runtime/GraphicsModBackend.h
+  GraphicsModSystem/Runtime/GraphicsModHash.cpp
+  GraphicsModSystem/Runtime/GraphicsModHash.h
   GraphicsModSystem/Runtime/GraphicsModManager.cpp
   GraphicsModSystem/Runtime/GraphicsModManager.h
+  GraphicsModSystem/Runtime/GraphicsModRuntimeBackend.cpp
+  GraphicsModSystem/Runtime/GraphicsModRuntimeBackend.h
   HiresTextures.cpp
   HiresTextures.h
   IndexGenerator.cpp

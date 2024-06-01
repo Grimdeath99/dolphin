@@ -141,7 +141,6 @@
     <ClInclude Include="Common\NandPaths.h" />
     <ClInclude Include="Common\Network.h" />
     <ClInclude Include="Common\PcapFile.h" />
-    <ClInclude Include="Common\PerformanceCounter.h" />
     <ClInclude Include="Common\Profiler.h" />
     <ClInclude Include="Common\QoSSession.h" />
     <ClInclude Include="Common\Random.h" />
@@ -161,6 +160,7 @@
     <ClInclude Include="Common\SymbolDB.h" />
     <ClInclude Include="Common\Thread.h" />
     <ClInclude Include="Common\Timer.h" />
+    <ClInclude Include="Common\TimeUtil.h" />
     <ClInclude Include="Common\TraversalClient.h" />
     <ClInclude Include="Common\TraversalProto.h" />
     <ClInclude Include="Common\TypeUtils.h" />
@@ -201,6 +201,7 @@
     <ClInclude Include="Core\Core.h" />
     <ClInclude Include="Core\CoreTiming.h" />
     <ClInclude Include="Core\CPUThreadConfigCallback.h" />
+    <ClInclude Include="Core\Debugger\BranchWatch.h" />
     <ClInclude Include="Core\Debugger\CodeTrace.h" />
     <ClInclude Include="Core\Debugger\DebugInterface.h" />
     <ClInclude Include="Core\Debugger\Debugger_SymbolMap.h" />
@@ -282,6 +283,7 @@
     <ClInclude Include="Core\HW\EXI\EXI_DeviceIPL.h" />
     <ClInclude Include="Core\HW\EXI\EXI_DeviceMemoryCard.h" />
     <ClInclude Include="Core\HW\EXI\EXI_DeviceMic.h" />
+    <ClInclude Include="Core\HW\EXI\EXI_DeviceModem.h" />
     <ClInclude Include="Core\HW\EXI\EXI.h" />
     <ClInclude Include="Core\HW\GBACore.h" />
     <ClInclude Include="Core\HW\GBAPad.h" />
@@ -444,7 +446,6 @@
     <ClInclude Include="Core\PowerPC\PPCCache.h" />
     <ClInclude Include="Core\PowerPC\PPCSymbolDB.h" />
     <ClInclude Include="Core\PowerPC\PPCTables.h" />
-    <ClInclude Include="Core\PowerPC\Profiler.h" />
     <ClInclude Include="Core\PowerPC\SignatureDB\CSVSignatureDB.h" />
     <ClInclude Include="Core\PowerPC\SignatureDB\DSYSignatureDB.h" />
     <ClInclude Include="Core\PowerPC\SignatureDB\MEGASignatureDB.h" />
@@ -502,6 +503,7 @@
     <ClInclude Include="InputCommon\ControllerEmu\ControlGroup\IMUAccelerometer.h" />
     <ClInclude Include="InputCommon\ControllerEmu\ControlGroup\IMUCursor.h" />
     <ClInclude Include="InputCommon\ControllerEmu\ControlGroup\IMUGyroscope.h" />
+    <ClInclude Include="InputCommon\ControllerEmu\ControlGroup\IRPassthrough.h" />
     <ClInclude Include="InputCommon\ControllerEmu\ControlGroup\MixedTriggers.h" />
     <ClInclude Include="InputCommon\ControllerEmu\ControlGroup\ModifySettingsButton.h" />
     <ClInclude Include="InputCommon\ControllerEmu\ControlGroup\Slider.h" />
@@ -686,9 +688,12 @@
     <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\MeshControl.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\MeshExtractWindow.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\MeshImportWindow.h" />
+    <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\MiscControls.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\ShaderControl.h" />
+    <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\TagSelectionWindow.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\Controls\TextureControl.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\EditorAssetSource.h" />
+    <ClInclude Include="VideoCommon\GraphicsModEditor\EditorBackend.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\EditorEvents.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\EditorMain.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\EditorState.h" />
@@ -698,11 +703,12 @@
     <ClInclude Include="VideoCommon\GraphicsModEditor\Panels\PropertiesPanel.h" />
     <ClInclude Include="VideoCommon\GraphicsModEditor\SceneDumper.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsMod.h" />
+    <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsModAction.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsModAsset.h" />
-    <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsModFeature.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsModGroup.h" />
+    <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsModHashPolicy.h" />
+    <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsModTag.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsTarget.h" />
-    <ClInclude Include="VideoCommon\GraphicsModSystem\Config\GraphicsTargetGroup.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Constants.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\Actions\CustomMeshAction.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\Actions\CustomPipelineAction.h" />
@@ -711,14 +717,18 @@
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\Actions\PrintAction.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\Actions\ScaleAction.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\Actions\SkipAction.h" />
+    <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\Actions\TransformAction.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\CustomPipeline.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\CustomShaderCache.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\FBInfo.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModAction.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModActionData.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModActionFactory.h" />
+    <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModBackend.h" />
+    <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModHash.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModGroup.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModManager.h" />
+    <ClInclude Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModRuntimeBackend.h" />
     <ClInclude Include="VideoCommon\GraphicsModSystem\Types.h" />
     <ClInclude Include="VideoCommon\GXPipelineTypes.h" />
     <ClInclude Include="VideoCommon\HiresTextures.h" />
@@ -829,6 +839,7 @@
     <ClCompile Include="Common\IniFile.cpp" />
     <ClCompile Include="Common\IOFile.cpp" />
     <ClCompile Include="Common\JitRegister.cpp" />
+    <ClCompile Include="Common\JsonUtil.cpp" />
     <ClCompile Include="Common\LdrWatcher.cpp" />
     <ClCompile Include="Common\Logging\ConsoleListenerWin.cpp" />
     <ClCompile Include="Common\Logging\LogManager.cpp" />
@@ -839,7 +850,6 @@
     <ClCompile Include="Common\NandPaths.cpp" />
     <ClCompile Include="Common\Network.cpp" />
     <ClCompile Include="Common\PcapFile.cpp" />
-    <ClCompile Include="Common\PerformanceCounter.cpp" />
     <ClCompile Include="Common\Profiler.cpp" />
     <ClCompile Include="Common\QoSSession.cpp" />
     <ClCompile Include="Common\Random.cpp" />
@@ -851,6 +861,7 @@
     <ClCompile Include="Common\SymbolDB.cpp" />
     <ClCompile Include="Common\Thread.cpp" />
     <ClCompile Include="Common\Timer.cpp" />
+    <ClCompile Include="Common\TimeUtil.cpp" />
     <ClCompile Include="Common\TraversalClient.cpp" />
     <ClCompile Include="Common\UPnP.cpp" />
     <ClCompile Include="Common\WindowsRegistry.cpp" />
@@ -885,6 +896,7 @@
     <ClCompile Include="Core\Core.cpp" />
     <ClCompile Include="Core\CoreTiming.cpp" />
     <ClCompile Include="Core\CPUThreadConfigCallback.cpp" />
+    <ClCompile Include="Core\Debugger\BranchWatch.cpp" />
     <ClCompile Include="Core\Debugger\CodeTrace.cpp" />
     <ClCompile Include="Core\Debugger\Debugger_SymbolMap.cpp" />
     <ClCompile Include="Core\Debugger\Dump.cpp" />
@@ -951,7 +963,10 @@
     <ClCompile Include="Core\HW\DVD\FileMonitor.cpp" />
     <ClCompile Include="Core\HW\EXI\BBA\BuiltIn.cpp" />
     <ClCompile Include="Core\HW\EXI\BBA\TAP_Win32.cpp" />
+    <ClCompile Include="Core\HW\EXI\BBA\TAPServerConnection.cpp" />
+    <ClCompile Include="Core\HW\EXI\BBA\TAPServerBBA.cpp" />
     <ClCompile Include="Core\HW\EXI\BBA\XLINK_KAI_BBA.cpp" />
+    <ClCompile Include="Core\HW\EXI\Modem\TAPServerModem.cpp" />
     <ClCompile Include="Core\HW\EXI\EXI_Channel.cpp" />
     <ClCompile Include="Core\HW\EXI\EXI_Device.cpp" />
     <ClCompile Include="Core\HW\EXI\EXI_DeviceAD16.cpp" />
@@ -962,6 +977,7 @@
     <ClCompile Include="Core\HW\EXI\EXI_DeviceIPL.cpp" />
     <ClCompile Include="Core\HW\EXI\EXI_DeviceMemoryCard.cpp" />
     <ClCompile Include="Core\HW\EXI\EXI_DeviceMic.cpp" />
+    <ClCompile Include="Core\HW\EXI\EXI_DeviceModem.cpp" />
     <ClCompile Include="Core\HW\EXI\EXI.cpp" />
     <ClCompile Include="Core\HW\GBACore.cpp" />
     <ClCompile Include="Core\HW\GBAPad.cpp" />
@@ -1177,6 +1193,7 @@
     <ClCompile Include="InputCommon\ControllerEmu\ControlGroup\IMUAccelerometer.cpp" />
     <ClCompile Include="InputCommon\ControllerEmu\ControlGroup\IMUCursor.cpp" />
     <ClCompile Include="InputCommon\ControllerEmu\ControlGroup\IMUGyroscope.cpp" />
+    <ClCompile Include="InputCommon\ControllerEmu\ControlGroup\IRPassthrough.cpp" />
     <ClCompile Include="InputCommon\ControllerEmu\ControlGroup\MixedTriggers.cpp" />
     <ClCompile Include="InputCommon\ControllerEmu\ControlGroup\ModifySettingsButton.cpp" />
     <ClCompile Include="InputCommon\ControllerEmu\ControlGroup\Slider.cpp" />
@@ -1339,9 +1356,12 @@
     <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\MeshControl.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\MeshExtractWindow.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\MeshImportWindow.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\MiscControls.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\ShaderControl.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\TagSelectionWindow.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\Controls\TextureControl.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\EditorAssetSource.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModEditor\EditorBackend.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\EditorMain.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\EditorState.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\Panels\ActiveTargetsPanel.cpp" />
@@ -1349,11 +1369,12 @@
     <ClCompile Include="VideoCommon\GraphicsModEditor\Panels\PropertiesPanel.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModEditor\SceneDumper.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsMod.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsModAction.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsModAsset.cpp" />
-    <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsModFeature.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsModGroup.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsModHashPolicy.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsModTag.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsTarget.cpp" />
-    <ClCompile Include="VideoCommon\GraphicsModSystem\Config\GraphicsTargetGroup.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\CustomMeshAction.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\CustomPipelineAction.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\ModifyLight.cpp" />
@@ -1361,11 +1382,15 @@
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\PrintAction.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\ScaleAction.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\SkipAction.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\Actions\TransformAction.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\CustomPipeline.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\CustomShaderCache.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\FBInfo.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModActionFactory.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModBackend.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModHash.cpp" />
     <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModManager.cpp" />
+    <ClCompile Include="VideoCommon\GraphicsModSystem\Runtime\GraphicsModRuntimeBackend.cpp" />
     <ClCompile Include="VideoCommon\HiresTextures.cpp" />
     <ClCompile Include="VideoCommon\IndexGenerator.cpp" />
     <ClCompile Include="VideoCommon\LightingShaderGen.cpp" />

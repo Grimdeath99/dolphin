@@ -14,7 +14,6 @@
 #include "Common/EnumMap.h"
 #include "Common/Logging/Log.h"
 
-#include "Core/ConfigManager.h"
 #include "Core/CoreTiming.h"
 #include "Core/DolphinAnalytics.h"
 #include "Core/FifoPlayer/FifoPlayer.h"
@@ -347,7 +346,7 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
       // render multiple sub-frames and arrange the XFB copies in next to each-other in main memory
       // so they form a single completed XFB.
       // See https://dolphin-emu.org/blog/2017/11/19/hybridxfb/ for examples and more detail.
-      AfterFrameEvent::Trigger();
+      AfterFrameEvent::Trigger(Core::System::GetInstance());
 
       // Note: Theoretically, in the future we could track the VI configuration and try to detect
       //       when an XFB is the last XFB copy of a frame. Not only would we get a clean "end of
@@ -389,7 +388,8 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
     u32 addr = bpmem.tmem_config.tlut_src << 5;
 
     // The GameCube ignores the upper bits of this address. Some games (WW, MKDD) set them.
-    if (!SConfig::GetInstance().bWii)
+    auto& system = Core::System::GetInstance();
+    if (!system.IsWii())
       addr = addr & 0x01FFFFFF;
 
     // The copy below will always be in bounds as tmem is bigger than the maximum address a TLUT can
@@ -400,7 +400,6 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
         (1 << bpmem.tmem_config.tlut_dest.tmem_line_count.NumBits()) * TMEM_LINE_SIZE;
     static_assert(MAX_LOADABLE_TMEM_ADDR + MAX_TMEM_LINE_COUNT < TMEM_SIZE);
 
-    auto& system = Core::System::GetInstance();
     auto& memory = system.GetMemory();
     memory.CopyFromEmu(texMem + tmem_addr, addr, tmem_transfer_count);
 
@@ -603,7 +602,6 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
       {
         auto& system = Core::System::GetInstance();
         auto& memory = system.GetMemory();
-        u8* src_ptr = memory.GetPointer(src_addr);
 
         // AR and GB tiles are stored in separate TMEM banks => can't use a single memcpy for
         // everything
@@ -613,10 +611,13 @@ static void BPWritten(PixelShaderManager& pixel_shader_manager, XFStateManager& 
         {
           if (tmem_addr_even + TMEM_LINE_SIZE > TMEM_SIZE ||
               tmem_addr_odd + TMEM_LINE_SIZE > TMEM_SIZE)
+          {
             break;
+          }
 
-          memcpy(texMem + tmem_addr_even, src_ptr + bytes_read, TMEM_LINE_SIZE);
-          memcpy(texMem + tmem_addr_odd, src_ptr + bytes_read + TMEM_LINE_SIZE, TMEM_LINE_SIZE);
+          memory.CopyFromEmu(texMem + tmem_addr_even, src_addr + bytes_read, TMEM_LINE_SIZE);
+          memory.CopyFromEmu(texMem + tmem_addr_odd, src_addr + bytes_read + TMEM_LINE_SIZE,
+                             TMEM_LINE_SIZE);
           tmem_addr_even += TMEM_LINE_SIZE;
           tmem_addr_odd += TMEM_LINE_SIZE;
           bytes_read += TMEM_LINE_SIZE * 2;

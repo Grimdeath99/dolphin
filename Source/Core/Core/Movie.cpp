@@ -7,8 +7,8 @@
 #include <array>
 #include <cctype>
 #include <cstring>
-#include <iomanip>
 #include <iterator>
+#include <locale>
 #include <mbedtls/config.h>
 #include <mbedtls/md.h>
 #include <mutex>
@@ -18,6 +18,7 @@
 #include <variant>
 #include <vector>
 
+#include <fmt/chrono.h>
 #include <fmt/format.h>
 
 #include "Common/Assert.h"
@@ -129,9 +130,10 @@ std::string MovieManager::GetInputDisplay()
   {
     m_controllers = {};
     m_wiimotes = {};
+
+    const auto& si = m_system.GetSerialInterface();
     for (int i = 0; i < 4; ++i)
     {
-      auto& si = Core::System::GetInstance().GetSerialInterface();
       if (si.GetDeviceType(i) == SerialInterface::SIDEVICE_GC_GBA_EMULATED)
         m_controllers[i] = ControllerType::GBA;
       else if (si.GetDeviceType(i) != SerialInterface::SIDEVICE_NONE)
@@ -160,21 +162,19 @@ std::string MovieManager::GetInputDisplay()
 }
 
 // NOTE: GPU Thread
-std::string MovieManager::GetRTCDisplay()
+std::string MovieManager::GetRTCDisplay() const
 {
   using ExpansionInterface::CEXIIPL;
 
-  const time_t current_time =
-      CEXIIPL::GetEmulatedTime(Core::System::GetInstance(), CEXIIPL::UNIX_EPOCH);
-  const tm* const gm_time = gmtime(&current_time);
+  const time_t current_time = CEXIIPL::GetEmulatedTime(m_system, CEXIIPL::UNIX_EPOCH);
+  const tm gm_time = fmt::gmtime(current_time);
 
-  std::ostringstream format_time;
-  format_time << std::put_time(gm_time, "Date/Time: %c\n");
-  return format_time.str();
+  // Use current locale for formatting time, as fmt is locale-agnostic by default.
+  return fmt::format(std::locale{""}, "Date/Time: {:%c}", gm_time);
 }
 
 // NOTE: GPU Thread
-std::string MovieManager::GetRerecords()
+std::string MovieManager::GetRerecords() const
 {
   if (IsMovieActive())
     return fmt::format("Rerecords: {}", m_rerecords);
@@ -250,15 +250,14 @@ void MovieManager::Init(const BootParameters& boot)
 void MovieManager::InputUpdate()
 {
   m_current_input_count++;
-  if (IsRecordingInput())
-  {
-    auto& system = Core::System::GetInstance();
-    auto& core_timing = system.GetCoreTiming();
 
-    m_total_input_count = m_current_input_count;
-    m_total_tick_count += core_timing.GetTicks() - m_tick_count_at_last_input;
-    m_tick_count_at_last_input = core_timing.GetTicks();
-  }
+  if (!IsRecordingInput())
+    return;
+
+  const auto& core_timing = m_system.GetCoreTiming();
+  m_total_input_count = m_current_input_count;
+  m_total_tick_count += core_timing.GetTicks() - m_tick_count_at_last_input;
+  m_tick_count_at_last_input = core_timing.GetTicks();
 }
 
 // NOTE: CPU Thread
@@ -444,7 +443,7 @@ void MovieManager::ChangePads()
   if (m_controllers == controllers)
     return;
 
-  auto& si = Core::System::GetInstance().GetSerialInterface();
+  auto& si = m_system.GetSerialInterface();
   for (int i = 0; i < SerialInterface::MAX_SI_CHANNELS; ++i)
   {
     SerialInterface::SIDevices device = SerialInterface::SIDEVICE_NONE;
@@ -542,7 +541,7 @@ bool MovieManager::BeginRecordingInput(const ControllerTypeArray& controllers,
       if (File::Exists(save_path))
         File::Delete(save_path);
 
-      State::SaveAs(save_path);
+      State::SaveAs(m_system, save_path);
       m_recording_from_save_state = true;
 
       std::thread md5thread(&MovieManager::GetMD5, this);
@@ -573,9 +572,9 @@ bool MovieManager::BeginRecordingInput(const ControllerTypeArray& controllers,
     Config::AddLayer(ConfigLoaders::GenerateMovieConfigLoader(&header));
 
     if (Core::IsRunning())
-      Core::UpdateWantDeterminism();
+      Core::UpdateWantDeterminism(m_system);
   };
-  Core::RunOnCPUThread(start_recording, true);
+  Core::RunOnCPUThread(m_system, start_recording, true);
 
   Core::DisplayMessage("Starting movie recording", 2000);
   return true;
@@ -959,7 +958,7 @@ bool MovieManager::PlayInput(const std::string& movie_path,
   // Wiimotes cause desync issues if they're not reset before launching the game
   Wiimote::ResetAllWiimotes();
 
-  Core::UpdateWantDeterminism();
+  Core::UpdateWantDeterminism(m_system);
 
   m_temp_input.resize(recording_file.GetSize() - 256);
   recording_file.ReadBytes(m_temp_input.data(), m_temp_input.size());
@@ -1036,7 +1035,7 @@ void MovieManager::LoadInput(const std::string& movie_path)
   }
 
   ChangePads();
-  if (SConfig::GetInstance().bWii)
+  if (m_system.IsWii())
     ChangeWiiPads(true);
 
   u64 totalSavedBytes = t_record.GetSize() - 256;
@@ -1153,7 +1152,7 @@ void MovieManager::LoadInput(const std::string& movie_path)
       if (m_play_mode != PlayMode::Playing)
       {
         m_play_mode = PlayMode::Playing;
-        Core::UpdateWantDeterminism();
+        Core::UpdateWantDeterminism(m_system);
         Core::DisplayMessage("Switched to playback", 2000);
       }
     }
@@ -1162,7 +1161,7 @@ void MovieManager::LoadInput(const std::string& movie_path)
       if (m_play_mode != PlayMode::Recording)
       {
         m_play_mode = PlayMode::Recording;
-        Core::UpdateWantDeterminism();
+        Core::UpdateWantDeterminism(m_system);
         Core::DisplayMessage("Switched to recording", 2000);
       }
     }
@@ -1177,7 +1176,7 @@ void MovieManager::LoadInput(const std::string& movie_path)
 void MovieManager::CheckInputEnd()
 {
   if (m_current_byte >= m_temp_input.size() ||
-      (Core::System::GetInstance().GetCoreTiming().GetTicks() > m_total_tick_count &&
+      (m_system.GetCoreTiming().GetTicks() > m_total_tick_count &&
        !IsRecordingInputFromSaveState()))
   {
     EndPlayInput(!m_read_only);
@@ -1255,20 +1254,16 @@ void MovieManager::PlayController(GCPadStatus* PadStatus, int controllerID)
 
   if (m_pad_state.disc)
   {
-    Core::RunAsCPUThread([this] {
-      if (!m_system.GetDVDInterface().AutoChangeDisc())
-      {
-        m_system.GetCPU().Break();
-        PanicAlertFmtT("Change the disc to {0}", m_disc_change_filename);
-      }
-    });
+    const Core::CPUThreadGuard guard(m_system);
+    if (!m_system.GetDVDInterface().AutoChangeDisc(guard))
+    {
+      m_system.GetCPU().Break();
+      PanicAlertFmtT("Change the disc to {0}", m_disc_change_filename);
+    }
   }
 
   if (m_pad_state.reset)
-  {
-    auto& system = Core::System::GetInstance();
-    system.GetProcessorInterface().ResetButton_Tap();
-  }
+    m_system.GetProcessorInterface().ResetButton_Tap();
 
   {
     std::string display_str = GenerateInputDisplayString(m_pad_state, controllerID);
@@ -1344,9 +1339,8 @@ void MovieManager::EndPlayInput(bool cont)
   else if (m_play_mode != PlayMode::None)
   {
     // We can be called by EmuThread during boot (CPU::State::PowerDown)
-    auto& system = Core::System::GetInstance();
-    auto& cpu = system.GetCPU();
-    bool was_running = Core::IsRunningAndStarted() && !cpu.IsStepping();
+    auto& cpu = m_system.GetCPU();
+    const bool was_running = Core::IsRunningAndStarted() && !cpu.IsStepping();
     if (was_running && Config::Get(Config::MAIN_MOVIE_PAUSE_MOVIE))
       cpu.Break();
     m_rerecords = 0;
@@ -1361,7 +1355,7 @@ void MovieManager::EndPlayInput(bool cont)
     // delete tmpInput;
     // tmpInput = nullptr;
 
-    Core::QueueHostJob([=] { Core::UpdateWantDeterminism(); });
+    Core::QueueHostJob([](Core::System& system) { Core::UpdateWantDeterminism(system); });
   }
 }
 
@@ -1378,7 +1372,7 @@ void MovieManager::SaveRecording(const std::string& filename)
   header.filetype[2] = 'M';
   header.filetype[3] = 0x1A;
   strncpy(header.gameID.data(), SConfig::GetInstance().GetGameID().c_str(), 6);
-  header.bWii = SConfig::GetInstance().bWii;
+  header.bWii = m_system.IsWii();
   header.controllers = 0;
   header.GBAControllers = 0;
   for (int i = 0; i < 4; ++i)
@@ -1387,7 +1381,7 @@ void MovieManager::SaveRecording(const std::string& filename)
       header.GBAControllers |= 1 << i;
     if (IsUsingPad(i))
       header.controllers |= 1 << i;
-    if (IsUsingWiimote(i) && SConfig::GetInstance().bWii)
+    if (IsUsingWiimote(i) && m_system.IsWii())
       header.controllers |= 1 << (i + 4);
   }
 
@@ -1455,7 +1449,7 @@ void MovieManager::GetSettings()
 
   m_save_config = true;
   m_net_play = NetPlay::IsNetPlayRunning();
-  if (SConfig::GetInstance().bWii)
+  if (m_system.IsWii())
   {
     u64 title_id = SConfig::GetInstance().GetTitleID();
     m_clear_save = !File::Exists(
@@ -1525,14 +1519,11 @@ void MovieManager::CheckMD5()
   if (m_current_file_name.empty())
     return;
 
-  for (int i = 0, n = 0; i < 16; ++i)
-  {
-    if (m_temp_header.md5[i] != 0)
-      continue;
-    n++;
-    if (n == 16)
-      return;
-  }
+  // The MD5 hash was introduced in 3.0-846-gca650d4435.
+  // Before that, these header bytes were set to zero.
+  if (m_temp_header.md5 == std::array<u8, 16>{})
+    return;
+
   Core::DisplayMessage("Verifying checksum...", 2000);
 
   std::array<u8, 16> game_md5;

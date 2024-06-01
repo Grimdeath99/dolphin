@@ -36,7 +36,6 @@
 #include "Common/CommonTypes.h"
 #include "Common/Logging/Log.h"
 
-#include "Core/ConfigManager.h"
 #include "Core/Core.h"
 #include "Core/HW/CPU.h"
 #include "Core/HW/GPFifo.h"
@@ -221,7 +220,7 @@ T MMU::ReadFromHardware(u32 em_address)
     }
     else
     {
-      m_ppc_state.dCache.Read(em_address, &value, sizeof(T),
+      m_ppc_state.dCache.Read(m_memory, em_address, &value, sizeof(T),
                               HID0(m_ppc_state).DLOCK || flag != XCheckTLBFlag::Read);
     }
 
@@ -240,7 +239,7 @@ T MMU::ReadFromHardware(u32 em_address)
     }
     else
     {
-      m_ppc_state.dCache.Read(em_address + 0x10000000, &value, sizeof(T),
+      m_ppc_state.dCache.Read(m_memory, em_address + 0x10000000, &value, sizeof(T),
                               HID0(m_ppc_state).DLOCK || flag != XCheckTLBFlag::Read);
     }
 
@@ -413,7 +412,7 @@ void MMU::WriteToHardware(u32 em_address, const u32 data, const u32 size)
     em_address &= m_memory.GetRamMask();
 
     if (m_ppc_state.m_enable_dcache && !wi)
-      m_ppc_state.dCache.Write(em_address, &swapped_data, size, HID0(m_ppc_state).DLOCK);
+      m_ppc_state.dCache.Write(m_memory, em_address, &swapped_data, size, HID0(m_ppc_state).DLOCK);
 
     if (!m_ppc_state.m_enable_dcache || wi || flag != XCheckTLBFlag::Write)
       std::memcpy(&m_memory.GetRAM()[em_address], &swapped_data, size);
@@ -428,7 +427,7 @@ void MMU::WriteToHardware(u32 em_address, const u32 data, const u32 size)
 
     if (m_ppc_state.m_enable_dcache && !wi)
     {
-      m_ppc_state.dCache.Write(em_address + 0x10000000, &swapped_data, size,
+      m_ppc_state.dCache.Write(m_memory, em_address + 0x10000000, &swapped_data, size,
                                HID0(m_ppc_state).DLOCK);
     }
 
@@ -498,7 +497,7 @@ TryReadInstResult MMU::TryReadInstruction(u32 address)
   }
   else
   {
-    hex = m_ppc_state.iCache.ReadInstruction(address);
+    hex = m_ppc_state.iCache.ReadInstruction(m_memory, m_ppc_state, address);
   }
   return TryReadInstResult{true, from_bat, hex, address};
 }
@@ -559,8 +558,7 @@ void MMU::Memcheck(u32 address, u64 var, bool write, size_t size)
 
   mc->num_hits++;
 
-  const bool pause = mc->Action(m_system, &m_power_pc.GetDebugInterface(), var, address, write,
-                                size, m_ppc_state.pc);
+  const bool pause = mc->Action(m_system, var, address, write, size, m_ppc_state.pc);
   if (!pause)
     return;
 
@@ -1046,18 +1044,11 @@ void MMU::DMA_LCToMemory(const u32 mem_address, const u32 cache_address, const u
   }
 
   const u8* src = m_memory.GetL1Cache() + (cache_address & 0x3FFFF);
-  u8* dst = m_memory.GetPointer(mem_address);
-  if (dst == nullptr)
-    return;
-
-  memcpy(dst, src, 32 * num_blocks);
+  m_memory.CopyToEmu(mem_address, src, 32 * num_blocks);
 }
 
 void MMU::DMA_MemoryToLC(const u32 cache_address, const u32 mem_address, const u32 num_blocks)
 {
-  const u8* src = m_memory.GetPointer(mem_address);
-  u8* dst = m_memory.GetL1Cache() + (cache_address & 0x3FFFF);
-
   // No known game uses this; here for completeness.
   // TODO: Refactor.
   if ((mem_address & 0x0F000000) == 0x08000000)
@@ -1083,10 +1074,8 @@ void MMU::DMA_MemoryToLC(const u32 cache_address, const u32 mem_address, const u
     return;
   }
 
-  if (src == nullptr)
-    return;
-
-  memcpy(dst, src, 32 * num_blocks);
+  u8* dst = m_memory.GetL1Cache() + (cache_address & 0x3FFFF);
+  m_memory.CopyFromEmu(dst, mem_address, 32 * num_blocks);
 }
 
 static bool TranslateBatAddress(const BatTable& bat_table, u32* address, bool* wi)
@@ -1148,7 +1137,7 @@ void MMU::StoreDCacheLine(u32 address)
   }
 
   if (m_ppc_state.m_enable_dcache)
-    m_ppc_state.dCache.Store(address);
+    m_ppc_state.dCache.Store(m_memory, address);
 }
 
 void MMU::InvalidateDCacheLine(u32 address)
@@ -1170,7 +1159,7 @@ void MMU::InvalidateDCacheLine(u32 address)
   }
 
   if (m_ppc_state.m_enable_dcache)
-    m_ppc_state.dCache.Invalidate(address);
+    m_ppc_state.dCache.Invalidate(m_memory, address);
 }
 
 void MMU::FlushDCacheLine(u32 address)
@@ -1194,7 +1183,7 @@ void MMU::FlushDCacheLine(u32 address)
   }
 
   if (m_ppc_state.m_enable_dcache)
-    m_ppc_state.dCache.Flush(address);
+    m_ppc_state.dCache.Flush(m_memory, address);
 }
 
 void MMU::TouchDCacheLine(u32 address, bool store)
@@ -1218,7 +1207,7 @@ void MMU::TouchDCacheLine(u32 address, bool store)
   }
 
   if (m_ppc_state.m_enable_dcache)
-    m_ppc_state.dCache.Touch(address, store);
+    m_ppc_state.dCache.Touch(m_memory, address, store);
 }
 
 u32 MMU::IsOptimizableMMIOAccess(u32 address, u32 access_size) const
@@ -1241,7 +1230,7 @@ u32 MMU::IsOptimizableMMIOAccess(u32 address, u32 access_size) const
 
   // Check whether the address is an aligned address of an MMIO register.
   const bool aligned = (address & ((access_size >> 3) - 1)) == 0;
-  if (!aligned || !MMIO::IsMMIOAddress(address))
+  if (!aligned || !MMIO::IsMMIOAddress(address, m_system.IsWii()))
     return 0;
 
   return address;
@@ -1641,7 +1630,7 @@ void MMU::DBATUpdated()
 {
   m_dbat_table = {};
   UpdateBATs(m_dbat_table, SPR_DBAT0U);
-  bool extended_bats = SConfig::GetInstance().bWii && HID4(m_ppc_state).SBE;
+  bool extended_bats = m_system.IsWii() && HID4(m_ppc_state).SBE;
   if (extended_bats)
     UpdateBATs(m_dbat_table, SPR_DBAT4U);
   if (m_memory.GetFakeVMEM())
@@ -1663,7 +1652,7 @@ void MMU::IBATUpdated()
 {
   m_ibat_table = {};
   UpdateBATs(m_ibat_table, SPR_IBAT0U);
-  bool extended_bats = SConfig::GetInstance().bWii && HID4(m_ppc_state).SBE;
+  bool extended_bats = m_system.IsWii() && HID4(m_ppc_state).SBE;
   if (extended_bats)
     UpdateBATs(m_ibat_table, SPR_IBAT4U);
   if (m_memory.GetFakeVMEM())

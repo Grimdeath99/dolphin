@@ -9,6 +9,8 @@
 #include <picojson.h>
 
 #include "Common/FileUtil.h"
+#include "Common/IOFile.h"
+#include "Common/Logging/Log.h"
 #include "Common/StringUtil.h"
 
 #include "VideoCommon/Assets/MeshAsset.h"
@@ -37,35 +39,47 @@ bool ShowMeshImportWindow(std::string_view filename, bool* import_materials)
     if (ImGui::Button("Import", ImVec2(120, 0)))
     {
       VideoCommon::MeshData mesh_data;
-      VideoCommon::MeshData::FromGLTF(filename, &mesh_data);
-
-      std::string basename;
-      std::string basepath;
-      SplitPath(filename, &basepath, &basename, nullptr);
-
-      const std::string dolphin_mesh_filename = basepath + basename + ".dolmesh";
-      File::IOFile outbound_file(dolphin_mesh_filename, "wb");
-      VideoCommon::MeshData::ToDolphinMesh(&outbound_file, mesh_data);
-
-      const std::string dolphin_json_filename = basepath + basename + ".metadata";
-      std::ofstream json_stream;
-      File::OpenFStream(json_stream, dolphin_json_filename, std::ios_base::out);
-      if (!json_stream.is_open())
+      if (!VideoCommon::MeshData::FromGLTF(filename, &mesh_data))
       {
-        ERROR_LOG_FMT(VIDEO, "Failed to open metadata file '{}' for writing",
-                      dolphin_json_filename);
-        ImGui::CloseCurrentPopup();
+        // TODO: move this to the UI
+        ERROR_LOG_FMT(VIDEO, "Failed to read GLTF mesh '{}'", filename);
       }
       else
       {
-        picojson::object serialized_root;
-        VideoCommon::MeshData::ToJson(&serialized_root, mesh_data);
-        const auto output = picojson::value{serialized_root}.serialize(true);
-        json_stream << output;
-      }
+        std::string basename;
+        std::string basepath;
+        SplitPath(filename, &basepath, &basename, nullptr);
 
-      ImGui::CloseCurrentPopup();
-      result = true;
+        const std::string dolphin_mesh_filename = basepath + basename + ".dolmesh";
+        File::IOFile outbound_file(dolphin_mesh_filename, "wb");
+        if (!VideoCommon::MeshData::ToDolphinMesh(&outbound_file, mesh_data))
+        {
+          // TODO: move this to the UI
+          ERROR_LOG_FMT(VIDEO, "Failed to write Dolphin mesh '{}'", dolphin_mesh_filename);
+        }
+        else
+        {
+          const std::string dolphin_json_filename = basepath + basename + ".metadata";
+          std::ofstream json_stream;
+          File::OpenFStream(json_stream, dolphin_json_filename, std::ios_base::out);
+          if (!json_stream.is_open())
+          {
+            ERROR_LOG_FMT(VIDEO, "Failed to open metadata file '{}' for writing",
+                          dolphin_json_filename);
+            ImGui::CloseCurrentPopup();
+          }
+          else
+          {
+            picojson::object serialized_root;
+            VideoCommon::MeshData::ToJson(serialized_root, mesh_data);
+            const auto output = picojson::value{serialized_root}.serialize(true);
+            json_stream << output;
+          }
+        }
+
+        ImGui::CloseCurrentPopup();
+        result = true;
+      }
     }
 
     if (ImGui::Button("Cancel", ImVec2(120, 0)))

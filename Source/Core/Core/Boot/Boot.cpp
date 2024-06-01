@@ -351,11 +351,6 @@ bool CBoot::DVDReadDiscID(Core::System& system, const DiscIO::VolumeDisc& disc, 
   return true;
 }
 
-void CBoot::UpdateDebugger_MapLoaded()
-{
-  Host_NotifyMapLoaded();
-}
-
 // Get map file paths for the active title.
 bool CBoot::FindMapFile(std::string* existing_map_file, std::string* writable_map_file)
 {
@@ -376,13 +371,13 @@ bool CBoot::FindMapFile(std::string* existing_map_file, std::string* writable_ma
   return false;
 }
 
-bool CBoot::LoadMapFromFilename(const Core::CPUThreadGuard& guard)
+bool CBoot::LoadMapFromFilename(const Core::CPUThreadGuard& guard, PPCSymbolDB& ppc_symbol_db)
 {
   std::string strMapFilename;
   bool found = FindMapFile(&strMapFilename, nullptr);
-  if (found && g_symbolDB.LoadMap(guard, strMapFilename))
+  if (found && ppc_symbol_db.LoadMap(guard, strMapFilename))
   {
-    UpdateDebugger_MapLoaded();
+    Host_PPCSymbolsChanged();
     return true;
   }
 
@@ -514,15 +509,15 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
 {
   SConfig& config = SConfig::GetInstance();
 
-  if (!g_symbolDB.IsEmpty())
+  if (auto& ppc_symbol_db = system.GetPPCSymbolDB(); !ppc_symbol_db.IsEmpty())
   {
-    g_symbolDB.Clear();
-    UpdateDebugger_MapLoaded();
+    ppc_symbol_db.Clear();
+    Host_PPCSymbolsChanged();
   }
 
   // PAL Wii uses NTSC framerate and linecount in 60Hz modes
   system.GetVideoInterface().Preset(DiscIO::IsNTSC(config.m_region) ||
-                                    (config.bWii && Config::Get(Config::SYSCONF_PAL60)));
+                                    (system.IsWii() && Config::Get(Config::SYSCONF_PAL60)));
 
   struct BootTitle
   {
@@ -541,7 +536,7 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
       if (!volume)
         return false;
 
-      if (!EmulatedBS2(system, guard, config.bWii, *volume, riivolution_patches))
+      if (!EmulatedBS2(system, guard, system.IsWii(), *volume, riivolution_patches))
         return false;
 
       SConfig::OnNewTitleLoad(guard);
@@ -560,11 +555,11 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
       auto& ppc_state = system.GetPPCState();
 
       SetupMSR(ppc_state);
-      SetupHID(ppc_state, config.bWii);
-      SetupBAT(system, config.bWii);
+      SetupHID(ppc_state, system.IsWii());
+      SetupBAT(system, system.IsWii());
       CopyDefaultExceptionHandlers(system);
 
-      if (config.bWii)
+      if (system.IsWii())
       {
         // Set a value for the SP. It doesn't matter where this points to,
         // as long as it is a valid location. This value is taken from a homebrew binary.
@@ -573,7 +568,7 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
         // Because there is no TMD to get the requested system (IOS) version from,
         // we default to IOS58, which is the version used by the Homebrew Channel.
         SetupWiiMemory(system, IOS::HLE::IOSC::ConsoleType::Retail);
-        IOS::HLE::GetIOS()->BootIOS(Titles::IOS(58));
+        system.GetIOS()->BootIOS(Titles::IOS(58));
       }
       else
       {
@@ -595,9 +590,9 @@ bool CBoot::BootUp(Core::System& system, const Core::CPUThreadGuard& guard,
 
       ppc_state.pc = executable.reader->GetEntryPoint();
 
-      if (executable.reader->LoadSymbols(guard))
+      if (executable.reader->LoadSymbols(guard, system.GetPPCSymbolDB()))
       {
-        UpdateDebugger_MapLoaded();
+        Host_PPCSymbolsChanged();
         HLE::PatchFunctions(system);
       }
       return true;
@@ -701,7 +696,7 @@ void UpdateStateFlags(std::function<void(StateFlags*)> update_function)
 {
   CreateSystemMenuTitleDirs();
   const std::string file_path = Common::GetTitleDataPath(Titles::SYSTEM_MENU) + "/" WII_STATE;
-  const auto fs = IOS::HLE::GetIOS()->GetFS();
+  const auto fs = Core::System::GetInstance().GetIOS()->GetFS();
   constexpr IOS::HLE::FS::Mode rw_mode = IOS::HLE::FS::Mode::ReadWrite;
   const auto file = fs->CreateAndOpenFile(IOS::SYSMENU_UID, IOS::SYSMENU_GID, file_path,
                                           {rw_mode, rw_mode, rw_mode});
@@ -721,7 +716,7 @@ void UpdateStateFlags(std::function<void(StateFlags*)> update_function)
 
 void CreateSystemMenuTitleDirs()
 {
-  const auto& es = IOS::HLE::GetIOS()->GetESCore();
+  const auto& es = Core::System::GetInstance().GetIOS()->GetESCore();
   es.CreateTitleDirectories(Titles::SYSTEM_MENU, IOS::SYSMENU_GID);
 }
 

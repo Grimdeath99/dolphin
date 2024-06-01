@@ -6,6 +6,7 @@
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
 
+#include "Common/JsonUtil.h"
 #include "Core/System.h"
 
 #include "VideoCommon/Assets/CustomAssetLoader.h"
@@ -19,9 +20,49 @@ CustomMeshAction::Create(const picojson::value& json_data,
 {
   VideoCommon::CustomAssetLibrary::AssetID mesh_asset;
 
-  // TODO...
+  if (!json_data.is<picojson::object>())
+    return nullptr;
 
-  return std::make_unique<CustomMeshAction>(std::move(library), std::move(mesh_asset));
+  const auto& obj = json_data.get<picojson::object>();
+
+  if (const auto it = obj.find("mesh_asset"); it != obj.end())
+  {
+    if (it->second.is<std::string>())
+    {
+      mesh_asset = it->second.to_str();
+    }
+  }
+
+  Common::Vec3 scale{1, 1, 1};
+  if (const auto it = obj.find("scale"); it != obj.end())
+  {
+    if (it->second.is<picojson::object>())
+    {
+      FromJson(it->second.get<picojson::object>(), scale);
+    }
+  }
+
+  Common::Vec3 translation{};
+  if (const auto it = obj.find("translation"); it != obj.end())
+  {
+    if (it->second.is<picojson::object>())
+    {
+      FromJson(it->second.get<picojson::object>(), translation);
+    }
+  }
+
+  Common::Vec3 rotation{};
+  if (const auto it = obj.find("rotation"); it != obj.end())
+  {
+    if (it->second.is<picojson::object>())
+    {
+      FromJson(it->second.get<picojson::object>(), rotation);
+    }
+  }
+
+  return std::make_unique<CustomMeshAction>(std::move(library), std::move(rotation),
+                                            std::move(scale), std::move(translation),
+                                            std::move(mesh_asset));
 }
 
 CustomMeshAction::CustomMeshAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library)
@@ -30,8 +71,12 @@ CustomMeshAction::CustomMeshAction(std::shared_ptr<VideoCommon::CustomAssetLibra
 }
 
 CustomMeshAction::CustomMeshAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library,
+                                   Common::Vec3 rotation, Common::Vec3 scale,
+                                   Common::Vec3 translation,
                                    VideoCommon::CustomAssetLibrary::AssetID mesh_asset_id)
-    : m_library(std::move(library)), m_mesh_asset_id(std::move(mesh_asset_id))
+    : m_library(std::move(library)), m_mesh_asset_id(std::move(mesh_asset_id)),
+      m_scale(std::move(scale)), m_rotation(std::move(rotation)),
+      m_translation(std::move(translation))
 {
 }
 
@@ -60,6 +105,33 @@ void CustomMeshAction::OnDrawStarted(GraphicsModActionData::DrawStarted* draw_st
   if (m_mesh_asset_id == "") [[unlikely]]
     return;
 
+  if (m_recalculate_original_mesh_center)
+  {
+    auto vert_ptr = draw_started->original_mesh_data.data();
+    Common::Vec3 center_point{};
+    for (std::size_t vert_index = 0; vert_index < draw_started->original_mesh_data.size();
+         vert_index++)
+    {
+      float vx = 0;
+      std::memcpy(&vx, vert_ptr, sizeof(float));
+      center_point.x += vx;
+
+      float vy = 0;
+      std::memcpy(&vy, vert_ptr + sizeof(float), sizeof(float));
+      center_point.y += vy;
+
+      float vz = 0;
+      std::memcpy(&vz, vert_ptr + sizeof(float) * 2, sizeof(float));
+      center_point.z += vz;
+
+      vert_ptr += draw_started->current_vertex_format.GetVertexStride();
+    }
+    center_point.x /= draw_started->original_mesh_data.size();
+    center_point.y /= draw_started->original_mesh_data.size();
+    center_point.z /= draw_started->original_mesh_data.size();
+    m_original_mesh_center = center_point;
+  }
+
   auto& loader = Core::System::GetInstance().GetCustomAssetLoader();
 
   if (!m_cached_mesh_asset.m_asset || m_mesh_asset_id != m_cached_mesh_asset.m_asset->GetAssetId())
@@ -87,13 +159,13 @@ void CustomMeshAction::OnDrawStarted(GraphicsModActionData::DrawStarted* draw_st
       PortableVertexDeclaration vertex_declaration = mesh_chunk.vertex_declaration;
       vertex_declaration.posmtx = draw_started->current_vertex_format.GetVertexDeclaration().posmtx;
       render_chunk.m_native_vertex_format = g_gfx->CreateNativeVertexFormat(vertex_declaration);
-      render_chunk.m_mesh_chunk.indices = mesh_chunk.indices.get();
-      render_chunk.m_mesh_chunk.num_indices = mesh_chunk.num_indices;
+      render_chunk.m_mesh_chunk.index_data =
+          std::span<u16>(mesh_chunk.indices.get(), mesh_chunk.num_indices);
+      render_chunk.m_mesh_chunk.vertex_data =
+          std::span<u8>(mesh_chunk.vertex_data.get(), mesh_chunk.num_vertices);
       render_chunk.m_mesh_chunk.vertex_format = render_chunk.m_native_vertex_format.get();
-      render_chunk.m_mesh_chunk.num_vertices = mesh_chunk.num_vertices;
       render_chunk.m_mesh_chunk.vertex_stride =
           render_chunk.m_native_vertex_format->GetVertexStride();
-      render_chunk.m_mesh_chunk.vertices = mesh_chunk.vertex_data.get();
       render_chunk.m_mesh_chunk.primitive_type = mesh_chunk.primitive_type;
       render_chunk.m_mesh_chunk.components_available = mesh_chunk.components_available;
 
@@ -101,11 +173,15 @@ void CustomMeshAction::OnDrawStarted(GraphicsModActionData::DrawStarted* draw_st
       // is a state of the render pipeline
       render_chunk.m_mesh_chunk.cull_mode = CullMode::None;
 
-      const auto scale = Common::Matrix33::Scale(Common::Vec3{m_scale, m_scale, m_scale});
+      const auto scale = Common::Matrix33::Scale(m_scale);
       const auto rotation = Common::Quaternion::RotateXYZ(m_rotation);
+
+      const auto mesh_chunk_center =
+          (mesh_chunk.minimum_position + mesh_chunk.maximum_position) / 2.0f;
       render_chunk.m_mesh_chunk.transform =
-          Common::Matrix44::Translate(m_translation) * Common::Matrix44::FromQuaternion(rotation) *
-          Common::Matrix44::FromMatrix33(scale) * mesh_chunk.transform;
+          Common::Matrix44::Translate(m_original_mesh_center - mesh_chunk_center) *
+          Common::Matrix44::FromMatrix33(scale) * Common::Matrix44::FromQuaternion(rotation) *
+          Common::Matrix44::Translate(m_translation) * mesh_chunk.transform;
 
       for (std::size_t i = 0; i < vertex_declaration.texcoords.size(); i++)
       {
@@ -173,7 +249,7 @@ void CustomMeshAction::DrawImGui()
       ImGui::TableNextColumn();
       ImGui::Text("Scale");
       ImGui::TableNextColumn();
-      if (ImGui::InputFloat("##Scale", &m_scale))
+      if (ImGui::InputFloat3("##Scale", m_scale.data.data()))
       {
         GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
         m_transform_changed = true;
@@ -201,8 +277,16 @@ void CustomMeshAction::DrawImGui()
   }
 }
 
-void CustomMeshAction::SerializeToConfig(picojson::object*)
+void CustomMeshAction::SerializeToConfig(picojson::object* obj)
 {
+  if (!obj) [[unlikely]]
+    return;
+
+  auto& json_obj = *obj;
+  json_obj.emplace("translation", ToJsonObject(m_translation));
+  json_obj.emplace("scale", ToJsonObject(m_scale));
+  json_obj.emplace("rotation", ToJsonObject(m_rotation));
+  json_obj.emplace("mesh_asset", m_mesh_asset_id);
 }
 
 std::string CustomMeshAction::GetFactoryName() const

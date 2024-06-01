@@ -11,6 +11,7 @@
 
 #include <picojson.h>
 
+#include "Common/Matrix.h"
 #include "Common/SmallVector.h"
 
 #include "VideoCommon/AbstractTexture.h"
@@ -28,7 +29,8 @@ public:
   Create(const picojson::value& json_data,
          std::shared_ptr<VideoCommon::CustomAssetLibrary> library);
   explicit CustomMeshAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library);
-  CustomMeshAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library,
+  CustomMeshAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library, Common::Vec3 rotation,
+                   Common::Vec3 scale, Common::Vec3 translation,
                    VideoCommon::CustomAssetLibrary::AssetID mesh_asset_id);
   ~CustomMeshAction();
   void OnDrawStarted(GraphicsModActionData::DrawStarted*) override;
@@ -42,11 +44,13 @@ private:
   VideoCommon::CustomAssetLibrary::AssetID m_mesh_asset_id;
   VideoCommon::CachedAsset<VideoCommon::MeshAsset> m_cached_mesh_asset;
 
-  float m_scale = 1.0;
+  Common::Vec3 m_scale = Common::Vec3{1, 1, 1};
   Common::Vec3 m_rotation = Common::Vec3{0, 0, 0};
   Common::Vec3 m_translation = Common::Vec3{0, 0, 0};
+  Common::Vec3 m_original_mesh_center = Common::Vec3{0, 0, 0};
   bool m_transform_changed = false;
   bool m_mesh_asset_changed = false;
+  bool m_recalculate_original_mesh_center = true;
 
   struct RenderChunk
   {

@@ -86,6 +86,7 @@ add_library(common
   IOFile.h
   JitRegister.cpp
   JitRegister.h
+  JsonUtil.cpp
   JsonUtil.h
   Lazy.h
   LinearDiskCache.h
@@ -108,8 +109,6 @@ add_library(common
   Network.h
   PcapFile.cpp
   PcapFile.h
-  PerformanceCounter.cpp
-  PerformanceCounter.h
   Profiler.cpp
   Profiler.h
   QoSSession.cpp
@@ -138,6 +137,8 @@ add_library(common
   Thread.h
   Timer.cpp
   Timer.h
+  TimeUtil.cpp
+  TimeUtil.h
   TraversalClient.cpp
   TraversalClient.h
   TraversalProto.h

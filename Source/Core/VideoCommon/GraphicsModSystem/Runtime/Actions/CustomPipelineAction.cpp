@@ -103,8 +103,6 @@ CustomPipelineAction::CustomPipelineAction(
   m_pipeline_passes.resize(m_passes_config.size());
 }
 
-CustomPipelineAction::~CustomPipelineAction() = default;
-
 void CustomPipelineAction::OnDrawStarted(GraphicsModActionData::DrawStarted* draw_started)
 {
   if (!draw_started) [[unlikely]]

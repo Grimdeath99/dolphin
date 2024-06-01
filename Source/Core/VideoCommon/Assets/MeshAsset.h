@@ -12,12 +12,16 @@
 #include <picojson.h>
 
 #include "Common/CommonTypes.h"
-#include "Common/IOFile.h"
 #include "Common/Matrix.h"
 
 #include "VideoCommon/Assets/CustomAsset.h"
 #include "VideoCommon/NativeVertexFormat.h"
 #include "VideoCommon/RenderState.h"
+
+namespace File
+{
+class IOFile;
+}
 
 namespace VideoCommon
 {
@@ -31,6 +35,8 @@ struct MeshDataChunk
   PortableVertexDeclaration vertex_declaration;
   PrimitiveType primitive_type;
   u32 components_available;
+  Common::Vec3 minimum_position;
+  Common::Vec3 maximum_position;
   Common::Matrix44 transform;
   std::string material_name;
 };
@@ -39,16 +45,17 @@ struct MeshData
 {
   static bool FromJson(const CustomAssetLibrary::AssetID& asset_id, const picojson::object& json,
                        MeshData* data);
-  static void ToJson(picojson::object* obj, const MeshData& data);
+  static void ToJson(picojson::object& obj, const MeshData& data);
 
   static bool FromDolphinMesh(std::span<const u8> raw_data, MeshData* data);
 
-  static void ToDolphinMesh(File::IOFile* file_data, const MeshData& data);
+  static bool ToDolphinMesh(File::IOFile* file_data, const MeshData& data);
 
   static bool FromGLTF(std::string_view gltf_file, MeshData* data);
 
   std::vector<MeshDataChunk> m_mesh_chunks;
-  std::map<std::string, CustomAssetLibrary::AssetID> m_mesh_material_to_material_asset_id;
+  std::map<std::string, CustomAssetLibrary::AssetID, std::less<>>
+      m_mesh_material_to_material_asset_id;
 };
 
 class MeshAsset final : public CustomLoadableAsset<MeshData>

@@ -16,6 +16,7 @@
 #include "VideoCommon/Assets/MeshAsset.h"
 #include "VideoCommon/Assets/ShaderAsset.h"
 #include "VideoCommon/Assets/TextureAsset.h"
+#include "VideoCommon/RenderState.h"
 
 namespace VideoCommon
 {
@@ -274,12 +275,19 @@ CustomAssetLibrary::LoadInfo DirectFilesystemAssetLibrary::LoadMesh(const AssetI
   const auto approx_mem_size = metadata_size + mesh_size;
 
   File::IOFile file(PathToString(mesh->second), "rb");
+  if (!file.IsOpen())
+  {
+    ERROR_LOG_FMT(VIDEO, "Asset '{}' error - failed to open mesh file '{}'!", asset_id,
+                  PathToString(mesh->second));
+    return {};
+  }
+
   std::vector<u8> bytes;
   bytes.reserve(file.GetSize());
   file.ReadBytes(bytes.data(), file.GetSize());
   if (!MeshData::FromDolphinMesh(bytes, data))
   {
-    ERROR_LOG_FMT(VIDEO, "Asset '{}' error -  failed to load the mesh file '{}',", asset_id,
+    ERROR_LOG_FMT(VIDEO, "Asset '{}' error -  failed to load the mesh file '{}'!", asset_id,
                   PathToString(mesh->second));
     return {};
   }
@@ -287,7 +295,7 @@ CustomAssetLibrary::LoadInfo DirectFilesystemAssetLibrary::LoadMesh(const AssetI
   std::string json_data;
   if (!File::ReadFileToString(PathToString(metadata->second), json_data))
   {
-    ERROR_LOG_FMT(VIDEO, "Asset '{}' error -  failed to load the json file '{}',", asset_id,
+    ERROR_LOG_FMT(VIDEO, "Asset '{}' error -  failed to load the json file '{}'!", asset_id,
                   PathToString(metadata->second));
     return {};
   }
@@ -389,6 +397,7 @@ CustomAssetLibrary::LoadInfo DirectFilesystemAssetLibrary::LoadTexture(const Ass
   }
   else
   {
+    data->m_sampler = RenderState::GetLinearSamplerState();
     data->m_type = TextureData::Type::Type_Texture2D;
   }
 

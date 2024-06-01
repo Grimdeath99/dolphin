@@ -24,8 +24,6 @@
 #include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/VideoEvents.h"
 
-static constexpr bool hardcore_mode_enabled = false;
-
 static std::unique_ptr<OSD::Icon> DecodeBadgeToOSDIcon(const AchievementManager::Badge& badge);
 
 AchievementManager& AchievementManager::GetInstance()
@@ -38,6 +36,9 @@ void AchievementManager::Init()
 {
   if (!m_is_runtime_initialized && Config::Get(Config::RA_ENABLED))
   {
+    std::string host_url = Config::Get(Config::RA_HOST_URL);
+    if (!host_url.empty())
+      rc_api_set_host(host_url.c_str());
     rc_runtime_init(&m_runtime);
     m_is_runtime_initialized = true;
     m_queue.Reset("AchievementManagerQueue", [](const std::function<void()>& func) { func(); });
@@ -52,6 +53,10 @@ void AchievementManager::Init()
 void AchievementManager::SetUpdateCallback(UpdateCallback callback)
 {
   m_update_callback = std::move(callback);
+
+  if (!m_update_callback)
+    m_update_callback = [] {};
+
   m_update_callback();
 }
 
@@ -61,12 +66,13 @@ AchievementManager::ResponseType AchievementManager::Login(const std::string& pa
   {
     ERROR_LOG_FMT(ACHIEVEMENTS, "Attempted login (sync) to RetroAchievements server without "
                                 "Achievement Manager initialized.");
-    return AchievementManager::ResponseType::MANAGER_NOT_INITIALIZED;
+    return ResponseType::MANAGER_NOT_INITIALIZED;
   }
-  AchievementManager::ResponseType r_type = VerifyCredentials(password);
+
+  const ResponseType r_type = VerifyCredentials(password);
   FetchBadges();
-  if (m_update_callback)
-    m_update_callback();
+
+  m_update_callback();
   return r_type;
 }
 
@@ -76,14 +82,13 @@ void AchievementManager::LoginAsync(const std::string& password, const ResponseC
   {
     ERROR_LOG_FMT(ACHIEVEMENTS, "Attempted login (async) to RetroAchievements server without "
                                 "Achievement Manager initialized.");
-    callback(AchievementManager::ResponseType::MANAGER_NOT_INITIALIZED);
+    callback(ResponseType::MANAGER_NOT_INITIALIZED);
     return;
   }
   m_queue.EmplaceItem([this, password, callback] {
     callback(VerifyCredentials(password));
     FetchBadges();
-    if (m_update_callback)
-      m_update_callback();
+    m_update_callback();
   });
 }
 
@@ -96,14 +101,14 @@ void AchievementManager::HashGame(const std::string& file_path, const ResponseCa
 {
   if (!Config::Get(Config::RA_ENABLED) || !IsLoggedIn())
   {
-    callback(AchievementManager::ResponseType::NOT_ENABLED);
+    callback(ResponseType::NOT_ENABLED);
     return;
   }
   if (!m_is_runtime_initialized)
   {
     ERROR_LOG_FMT(ACHIEVEMENTS,
                   "Attempted to load game achievements without Achievement Manager initialized.");
-    callback(AchievementManager::ResponseType::MANAGER_NOT_INITIALIZED);
+    callback(ResponseType::MANAGER_NOT_INITIALIZED);
     return;
   }
   if (m_disabled)
@@ -130,7 +135,7 @@ void AchievementManager::HashGame(const std::string& file_path, const ResponseCa
       {
         ERROR_LOG_FMT(ACHIEVEMENTS, "Unable to generate achievement hash from game file {}.",
                       file_path);
-        callback(AchievementManager::ResponseType::MALFORMED_OBJECT);
+        callback(ResponseType::MALFORMED_OBJECT);
       }
     }
     {
@@ -138,7 +143,7 @@ void AchievementManager::HashGame(const std::string& file_path, const ResponseCa
       if (m_disabled)
       {
         INFO_LOG_FMT(ACHIEVEMENTS, "Achievements disabled while hash was resolving.");
-        callback(AchievementManager::ResponseType::EXPIRED_CONTEXT);
+        callback(ResponseType::EXPIRED_CONTEXT);
         return;
       }
       m_game_hash = std::move(new_hash);
@@ -151,14 +156,14 @@ void AchievementManager::HashGame(const DiscIO::Volume* volume, const ResponseCa
 {
   if (!Config::Get(Config::RA_ENABLED) || !IsLoggedIn())
   {
-    callback(AchievementManager::ResponseType::NOT_ENABLED);
+    callback(ResponseType::NOT_ENABLED);
     return;
   }
   if (!m_is_runtime_initialized)
   {
     ERROR_LOG_FMT(ACHIEVEMENTS,
                   "Attempted to load game achievements without Achievement Manager initialized.");
-    callback(AchievementManager::ResponseType::MANAGER_NOT_INITIALIZED);
+    callback(ResponseType::MANAGER_NOT_INITIALIZED);
     return;
   }
   if (volume == nullptr)
@@ -174,23 +179,20 @@ void AchievementManager::HashGame(const DiscIO::Volume* volume, const ResponseCa
     return;
   }
   // Need to SetDisabled outside a lock because it uses m_lock internally.
-  bool disable = false;
+  bool disable = true;
   {
     std::lock_guard lg{m_lock};
-    if (m_loading_volume.get() != nullptr)
-    {
-      disable = true;
-    }
-    else
+    if (!m_loading_volume)
     {
       m_loading_volume = DiscIO::CreateVolume(volume->GetBlobReader().CopyReader());
+      disable = false;
     }
   }
   if (disable)
   {
     INFO_LOG_FMT(ACHIEVEMENTS, "Disabling Achievement Manager due to hash spam.");
     SetDisabled(true);
-    callback(AchievementManager::ResponseType::EXPIRED_CONTEXT);
+    callback(ResponseType::EXPIRED_CONTEXT);
     return;
   }
   m_system = &Core::System::GetInstance();
@@ -209,7 +211,7 @@ void AchievementManager::HashGame(const DiscIO::Volume* volume, const ResponseCa
       if (!rc_hash_generate_from_file(new_hash.data(), RC_CONSOLE_GAMECUBE, ""))
       {
         ERROR_LOG_FMT(ACHIEVEMENTS, "Unable to generate achievement hash from volume.");
-        callback(AchievementManager::ResponseType::MALFORMED_OBJECT);
+        callback(ResponseType::MALFORMED_OBJECT);
         return;
       }
     }
@@ -218,7 +220,7 @@ void AchievementManager::HashGame(const DiscIO::Volume* volume, const ResponseCa
       if (m_disabled)
       {
         INFO_LOG_FMT(ACHIEVEMENTS, "Achievements disabled while hash was resolving.");
-        callback(AchievementManager::ResponseType::EXPIRED_CONTEXT);
+        callback(ResponseType::EXPIRED_CONTEXT);
         return;
       }
       m_game_hash = std::move(new_hash);
@@ -232,7 +234,7 @@ void AchievementManager::LoadGameSync(const ResponseCallback& callback)
 {
   if (!Config::Get(Config::RA_ENABLED) || !IsLoggedIn())
   {
-    callback(AchievementManager::ResponseType::NOT_ENABLED);
+    callback(ResponseType::NOT_ENABLED);
     return;
   }
   u32 new_game_id = 0;
@@ -315,8 +317,7 @@ void AchievementManager::LoadGameSync(const ResponseCallback& callback)
   m_last_ping_time = 0;
   INFO_LOG_FMT(ACHIEVEMENTS, "RetroAchievements successfully loaded for {}.", m_game_data.title);
 
-  if (m_update_callback)
-    m_update_callback();
+  m_update_callback();
   callback(fetch_game_data_response);
 }
 
@@ -329,7 +330,7 @@ void AchievementManager::LoadUnlockData(const ResponseCallback& callback)
 {
   if (!Config::Get(Config::RA_ENABLED) || !IsLoggedIn())
   {
-    callback(AchievementManager::ResponseType::NOT_ENABLED);
+    callback(ResponseType::NOT_ENABLED);
     return;
   }
   m_queue.EmplaceItem([this, callback] {
@@ -343,13 +344,13 @@ void AchievementManager::LoadUnlockData(const ResponseCallback& callback)
     }
 
     callback(FetchUnlockData(false));
-    if (m_update_callback)
-      m_update_callback();
+    m_update_callback();
   });
 }
 
 void AchievementManager::ActivateDeactivateAchievements()
 {
+  std::lock_guard lg{m_lock};
   if (!Config::Get(Config::RA_ENABLED) || !IsLoggedIn())
     return;
   bool enabled = Config::Get(Config::RA_ACHIEVEMENTS_ENABLED);
@@ -357,11 +358,11 @@ void AchievementManager::ActivateDeactivateAchievements()
   bool encore = Config::Get(Config::RA_ENCORE_ENABLED);
   for (u32 ix = 0; ix < m_game_data.num_achievements; ix++)
   {
-    u32 points = (m_game_data.achievements[ix].category == RC_ACHIEVEMENT_CATEGORY_UNOFFICIAL) ?
-                     0 :
-                     m_game_data.achievements[ix].points;
-    auto iter = m_unlock_map.insert(
-        {m_game_data.achievements[ix].id, UnlockStatus{.game_data_index = ix, .points = points}});
+    auto iter =
+        m_unlock_map.insert({m_game_data.achievements[ix].id,
+                             UnlockStatus{.game_data_index = ix,
+                                          .points = m_game_data.achievements[ix].points,
+                                          .category = m_game_data.achievements[ix].category}});
     ActivateDeactivateAchievement(iter.first->first, enabled, unofficial, encore);
   }
   INFO_LOG_FMT(ACHIEVEMENTS, "Achievements (de)activated.");
@@ -369,20 +370,21 @@ void AchievementManager::ActivateDeactivateAchievements()
 
 void AchievementManager::ActivateDeactivateLeaderboards()
 {
+  std::lock_guard lg{m_lock};
   if (!Config::Get(Config::RA_ENABLED) || !IsLoggedIn())
     return;
-  bool leaderboards_enabled = Config::Get(Config::RA_LEADERBOARDS_ENABLED);
+  bool leaderboards_enabled =
+      Config::Get(Config::RA_LEADERBOARDS_ENABLED) && Config::Get(Config::RA_HARDCORE_ENABLED);
   for (u32 ix = 0; ix < m_game_data.num_leaderboards; ix++)
   {
     auto leaderboard = m_game_data.leaderboards[ix];
     u32 leaderboard_id = leaderboard.id;
-    if (m_is_game_loaded && leaderboards_enabled && hardcore_mode_enabled)
+    if (m_is_game_loaded && leaderboards_enabled)
     {
       rc_runtime_activate_lboard(&m_runtime, leaderboard_id, leaderboard.definition, nullptr, 0);
       m_queue.EmplaceItem([this, leaderboard_id] {
         FetchBoardInfo(leaderboard_id);
-        if (m_update_callback)
-          m_update_callback();
+        m_update_callback();
       });
     }
     else
@@ -395,6 +397,7 @@ void AchievementManager::ActivateDeactivateLeaderboards()
 
 void AchievementManager::ActivateDeactivateRichPresence()
 {
+  std::lock_guard lg{m_lock};
   if (!Config::Get(Config::RA_ENABLED) || !IsLoggedIn())
     return;
   rc_runtime_activate_richpresence(
@@ -410,8 +413,7 @@ void AchievementManager::FetchBadges()
 {
   if (!m_is_runtime_initialized || !IsLoggedIn() || !Config::Get(Config::RA_BADGES_ENABLED))
   {
-    if (m_update_callback)
-      m_update_callback();
+    m_update_callback();
     return;
   }
   m_image_queue.Cancel();
@@ -446,32 +448,31 @@ void AchievementManager::FetchBadges()
       {
         WARN_LOG_FMT(ACHIEVEMENTS, "Failed to download player badge id {}.", name_to_fetch);
       }
-      if (m_update_callback)
-        m_update_callback();
+
+      m_update_callback();
     });
   }
 
   if (!IsGameLoaded())
   {
-    if (m_update_callback)
-      m_update_callback();
+    m_update_callback();
     return;
   }
 
-  int badgematch = 0;
+  bool badgematch = false;
   {
     std::lock_guard lg{m_lock};
-    badgematch = m_game_badge.name.compare(m_game_data.image_name);
+    badgematch = m_game_badge.name == m_game_data.image_name;
   }
-  if (badgematch != 0)
+  if (!badgematch)
   {
     m_image_queue.EmplaceItem([this] {
       std::string name_to_fetch;
       {
         std::lock_guard lg{m_lock};
-        if (m_game_badge.name.compare(m_game_data.image_name) == 0)
+        if (m_game_badge.name == m_game_data.image_name)
           return;
-        name_to_fetch.assign(m_game_data.image_name);
+        name_to_fetch = m_game_data.image_name;
       }
       rc_api_fetch_image_request_t icon_request = {.image_name = name_to_fetch.c_str(),
                                                    .image_type = RC_IMAGE_TYPE_GAME};
@@ -480,7 +481,7 @@ void AchievementManager::FetchBadges()
       {
         INFO_LOG_FMT(ACHIEVEMENTS, "Successfully downloaded game badge id {}.", name_to_fetch);
         std::lock_guard lg{m_lock};
-        if (name_to_fetch.compare(m_game_data.image_name) != 0)
+        if (name_to_fetch != m_game_data.image_name)
         {
           INFO_LOG_FMT(ACHIEVEMENTS, "Requested outdated badge id {} for game id {}.",
                        name_to_fetch, m_game_data.image_name);
@@ -493,8 +494,8 @@ void AchievementManager::FetchBadges()
       {
         WARN_LOG_FMT(ACHIEVEMENTS, "Failed to download game badge id {}.", name_to_fetch);
       }
-      if (m_update_callback)
-        m_update_callback();
+
+      m_update_callback();
     });
   }
 
@@ -536,7 +537,7 @@ void AchievementManager::FetchBadges()
                 index);
             return;
           }
-          name_to_fetch.assign(achievement.badge_name);
+          name_to_fetch = achievement.badge_name;
           current_name = unlock_itr->second.unlocked_badge.name;
         }
         if (current_name == name_to_fetch)
@@ -564,7 +565,7 @@ void AchievementManager::FetchBadges()
                           "Fetched unlocked badge for achievement id {} not in unlock map.", index);
             return;
           }
-          if (name_to_fetch.compare(achievement.badge_name) != 0)
+          if (name_to_fetch != achievement.badge_name)
           {
             INFO_LOG_FMT(
                 ACHIEVEMENTS,
@@ -580,8 +581,8 @@ void AchievementManager::FetchBadges()
           WARN_LOG_FMT(ACHIEVEMENTS, "Failed to download unlocked achievement badge id {}.",
                        name_to_fetch);
         }
-        if (m_update_callback)
-          m_update_callback();
+
+        m_update_callback();
       });
     }
     if (unlock_status.locked_badge.name != badge_name_to_fetch)
@@ -607,7 +608,7 @@ void AchievementManager::FetchBadges()
                 "Attempted to fetch locked badge for achievement id {} not in unlock map.", index);
             return;
           }
-          name_to_fetch.assign(achievement.badge_name);
+          name_to_fetch = achievement.badge_name;
           current_name = unlock_itr->second.locked_badge.name;
         }
         if (current_name == name_to_fetch)
@@ -635,7 +636,7 @@ void AchievementManager::FetchBadges()
                           "Fetched locked badge for achievement id {} not in unlock map.", index);
             return;
           }
-          if (name_to_fetch.compare(achievement.badge_name) != 0)
+          if (name_to_fetch != achievement.badge_name)
           {
             INFO_LOG_FMT(ACHIEVEMENTS,
                          "Requested outdated locked achievement badge id {} for achievement id {}.",
@@ -650,18 +651,18 @@ void AchievementManager::FetchBadges()
           WARN_LOG_FMT(ACHIEVEMENTS, "Failed to download locked achievement badge id {}.",
                        name_to_fetch);
         }
-        if (m_update_callback)
-          m_update_callback();
+
+        m_update_callback();
       });
     }
   }
-  if (m_update_callback)
-    m_update_callback();
+
+  m_update_callback();
 }
 
 void AchievementManager::DoFrame()
 {
-  if (!m_is_game_loaded)
+  if (!m_is_game_loaded || !Core::IsCPUThread())
     return;
   if (m_framecount == 0x200)
   {
@@ -671,7 +672,8 @@ void AchievementManager::DoFrame()
   {
     m_framecount++;
   }
-  Core::RunAsCPUThread([&] {
+  {
+    std::lock_guard lg{m_lock};
     rc_runtime_do_frame(
         &m_runtime,
         [](const rc_runtime_event_t* runtime_event) {
@@ -681,17 +683,16 @@ void AchievementManager::DoFrame()
           return static_cast<AchievementManager*>(ud)->MemoryPeeker(address, num_bytes, ud);
         },
         this, nullptr);
-  });
+  }
   if (!m_system)
     return;
   time_t current_time = std::time(nullptr);
   if (difftime(current_time, m_last_ping_time) > 120)
   {
-    GenerateRichPresence();
+    GenerateRichPresence(Core::CPUThreadGuard{*m_system});
     m_queue.EmplaceItem([this] { PingRichPresence(m_rich_presence); });
     m_last_ping_time = current_time;
-    if (m_update_callback)
-      m_update_callback();
+    m_update_callback();
   }
 }
 
@@ -708,15 +709,17 @@ u32 AchievementManager::MemoryPeeker(u32 address, u32 num_bytes, void* ud)
         .value_or(PowerPC::ReadResult<u8>(false, 0u))
         .value;
   case 2:
-    return m_system->GetMMU()
-        .HostTryReadU16(threadguard, address, PowerPC::RequestedAddressSpace::Physical)
-        .value_or(PowerPC::ReadResult<u16>(false, 0u))
-        .value;
+    return Common::swap16(
+        m_system->GetMMU()
+            .HostTryReadU16(threadguard, address, PowerPC::RequestedAddressSpace::Physical)
+            .value_or(PowerPC::ReadResult<u16>(false, 0u))
+            .value);
   case 4:
-    return m_system->GetMMU()
-        .HostTryReadU32(threadguard, address, PowerPC::RequestedAddressSpace::Physical)
-        .value_or(PowerPC::ReadResult<u32>(false, 0u))
-        .value;
+    return Common::swap32(
+        m_system->GetMMU()
+            .HostTryReadU32(threadguard, address, PowerPC::RequestedAddressSpace::Physical)
+            .value_or(PowerPC::ReadResult<u32>(false, 0u))
+            .value);
   default:
     ASSERT(false);
     return 0u;
@@ -725,35 +728,30 @@ u32 AchievementManager::MemoryPeeker(u32 address, u32 num_bytes, void* ud)
 
 void AchievementManager::AchievementEventHandler(const rc_runtime_event_t* runtime_event)
 {
+  switch (runtime_event->type)
   {
-    std::lock_guard lg{m_lock};
-    switch (runtime_event->type)
-    {
-    case RC_RUNTIME_EVENT_ACHIEVEMENT_TRIGGERED:
-      HandleAchievementTriggeredEvent(runtime_event);
-      break;
-    case RC_RUNTIME_EVENT_ACHIEVEMENT_PROGRESS_UPDATED:
-      HandleAchievementProgressUpdatedEvent(runtime_event);
-      break;
-    case RC_RUNTIME_EVENT_ACHIEVEMENT_PRIMED:
-      HandleAchievementPrimedEvent(runtime_event);
-      break;
-    case RC_RUNTIME_EVENT_ACHIEVEMENT_UNPRIMED:
-      HandleAchievementUnprimedEvent(runtime_event);
-      break;
-    case RC_RUNTIME_EVENT_LBOARD_STARTED:
-      HandleLeaderboardStartedEvent(runtime_event);
-      break;
-    case RC_RUNTIME_EVENT_LBOARD_CANCELED:
-      HandleLeaderboardCanceledEvent(runtime_event);
-      break;
-    case RC_RUNTIME_EVENT_LBOARD_TRIGGERED:
-      HandleLeaderboardTriggeredEvent(runtime_event);
-      break;
-    }
+  case RC_RUNTIME_EVENT_ACHIEVEMENT_TRIGGERED:
+    HandleAchievementTriggeredEvent(runtime_event);
+    break;
+  case RC_RUNTIME_EVENT_ACHIEVEMENT_PROGRESS_UPDATED:
+    HandleAchievementProgressUpdatedEvent(runtime_event);
+    break;
+  case RC_RUNTIME_EVENT_ACHIEVEMENT_PRIMED:
+    HandleAchievementPrimedEvent(runtime_event);
+    break;
+  case RC_RUNTIME_EVENT_ACHIEVEMENT_UNPRIMED:
+    HandleAchievementUnprimedEvent(runtime_event);
+    break;
+  case RC_RUNTIME_EVENT_LBOARD_STARTED:
+    HandleLeaderboardStartedEvent(runtime_event);
+    break;
+  case RC_RUNTIME_EVENT_LBOARD_CANCELED:
+    HandleLeaderboardCanceledEvent(runtime_event);
+    break;
+  case RC_RUNTIME_EVENT_LBOARD_TRIGGERED:
+    HandleLeaderboardTriggeredEvent(runtime_event);
+    break;
   }
-  if (m_update_callback)
-    m_update_callback();
 }
 
 std::recursive_mutex& AchievementManager::GetLock()
@@ -798,8 +796,11 @@ AchievementManager::PointSpread AchievementManager::TallyScore() const
   PointSpread spread{};
   if (!IsGameLoaded())
     return spread;
+  bool hardcore_mode_enabled = Config::Get(Config::RA_HARDCORE_ENABLED);
   for (const auto& entry : m_unlock_map)
   {
+    if (entry.second.category != RC_ACHIEVEMENT_CATEGORY_CORE)
+      continue;
     u32 points = entry.second.points;
     spread.total_count++;
     spread.total_points += points;
@@ -862,11 +863,10 @@ AchievementManager::GetLeaderboardsInfo() const
   return m_leaderboard_map;
 }
 
-AchievementManager::RichPresence AchievementManager::GetRichPresence()
+AchievementManager::RichPresence AchievementManager::GetRichPresence() const
 {
   std::lock_guard lg{m_lock};
-  RichPresence rich_presence = m_rich_presence;
-  return rich_presence;
+  return m_rich_presence;
 }
 
 void AchievementManager::SetDisabled(bool disable)
@@ -885,10 +885,14 @@ void AchievementManager::SetDisabled(bool disable)
     INFO_LOG_FMT(ACHIEVEMENTS, "Achievement Manager has been disabled.");
     OSD::AddMessage("Please close all games to re-enable achievements.", OSD::Duration::VERY_LONG,
                     OSD::Color::RED);
+    m_update_callback();
   }
 
   if (previously_disabled && !disable)
+  {
     INFO_LOG_FMT(ACHIEVEMENTS, "Achievement Manager has been re-enabled.");
+    m_update_callback();
+  }
 };
 
 const AchievementManager::NamedIconMap& AchievementManager::GetChallengeIcons() const
@@ -903,22 +907,23 @@ void AchievementManager::CloseGame()
     if (m_is_game_loaded)
     {
       m_is_game_loaded = false;
+      m_active_challenges.clear();
       ActivateDeactivateAchievements();
       ActivateDeactivateLeaderboards();
       ActivateDeactivateRichPresence();
       m_game_id = 0;
-      m_game_badge.name = "";
+      m_game_badge.name.clear();
       m_unlock_map.clear();
       m_leaderboard_map.clear();
       rc_api_destroy_fetch_game_data_response(&m_game_data);
-      std::memset(&m_game_data, 0, sizeof(m_game_data));
+      m_game_data = {};
       m_queue.Cancel();
       m_image_queue.Cancel();
       m_system = nullptr;
     }
   }
-  if (m_update_callback)
-    m_update_callback();
+
+  m_update_callback();
   INFO_LOG_FMT(ACHIEVEMENTS, "Game closed.");
 }
 
@@ -927,17 +932,19 @@ void AchievementManager::Logout()
   {
     std::lock_guard lg{m_lock};
     CloseGame();
-    m_player_badge.name = "";
+    SetDisabled(false);
+    m_player_badge.name.clear();
     Config::SetBaseOrCurrent(Config::RA_API_TOKEN, "");
   }
-  if (m_update_callback)
-    m_update_callback();
+
+  m_update_callback();
   INFO_LOG_FMT(ACHIEVEMENTS, "Logged out from server.");
 }
 
 void AchievementManager::Shutdown()
 {
   CloseGame();
+  SetDisabled(false);
   m_is_runtime_initialized = false;
   m_queue.Shutdown();
   // DON'T log out - keep those credentials for next run.
@@ -1134,7 +1141,7 @@ AchievementManager::ResponseType AchievementManager::FetchGameData()
                   game_id, api_request.url,
                   api_request.post_data == nullptr ? "NULL" : api_request.post_data, response_str);
     rc_api_destroy_fetch_game_data_response(&m_game_data);
-    std::memset(&m_game_data, 0, sizeof(m_game_data));
+    m_game_data = {};
     return ResponseType::MALFORMED_OBJECT;
   }
   if (!m_game_data.response.succeeded)
@@ -1146,7 +1153,7 @@ AchievementManager::ResponseType AchievementManager::FetchGameData()
     // Logout technically does this via a CloseGame call, but doing this now prevents the activate
     // methods from thinking they have something to do.
     rc_api_destroy_fetch_game_data_response(&m_game_data);
-    std::memset(&m_game_data, 0, sizeof(m_game_data));
+    m_game_data = {};
     Logout();
     return ResponseType::INVALID_CREDENTIALS;
   }
@@ -1156,7 +1163,7 @@ AchievementManager::ResponseType AchievementManager::FetchGameData()
                  "Attempted to retrieve game data for ID {}; running game is now ID {}", game_id,
                  m_game_id);
     rc_api_destroy_fetch_game_data_response(&m_game_data);
-    std::memset(&m_game_data, 0, sizeof(m_game_data));
+    m_game_data = {};
     return ResponseType::EXPIRED_CONTEXT;
   }
   INFO_LOG_FMT(ACHIEVEMENTS, "Retrieved game data for ID {}.", game_id);
@@ -1221,15 +1228,17 @@ AchievementManager::ResponseType AchievementManager::FetchBoardInfo(AchievementI
     for (u32 i = 0; i < board_info.num_entries; ++i)
     {
       const auto& org_entry = board_info.entries[i];
-      LeaderboardEntry dest_entry =
-          LeaderboardEntry{.username = org_entry.username, .rank = org_entry.rank};
+      auto dest_entry = LeaderboardEntry{
+          .username = org_entry.username,
+          .rank = org_entry.rank,
+      };
       if (rc_runtime_format_lboard_value(dest_entry.score.data(), FORMAT_SIZE, org_entry.score,
                                          board_info.format) == 0)
       {
         ERROR_LOG_FMT(ACHIEVEMENTS, "Failed to format leaderboard score {}.", org_entry.score);
         strncpy(dest_entry.score.data(), fmt::format("{}", org_entry.score).c_str(), FORMAT_SIZE);
       }
-      lboard.entries[org_entry.index] = dest_entry;
+      lboard.entries.insert_or_assign(org_entry.index, std::move(dest_entry));
     }
     rc_api_destroy_fetch_leaderboard_info_response(&board_info);
   }
@@ -1257,15 +1266,17 @@ AchievementManager::ResponseType AchievementManager::FetchBoardInfo(AchievementI
     for (u32 i = 0; i < board_info.num_entries; ++i)
     {
       const auto& org_entry = board_info.entries[i];
-      LeaderboardEntry dest_entry =
-          LeaderboardEntry{.username = org_entry.username, .rank = org_entry.rank};
+      auto dest_entry = LeaderboardEntry{
+          .username = org_entry.username,
+          .rank = org_entry.rank,
+      };
       if (rc_runtime_format_lboard_value(dest_entry.score.data(), FORMAT_SIZE, org_entry.score,
                                          board_info.format) == 0)
       {
         ERROR_LOG_FMT(ACHIEVEMENTS, "Failed to format leaderboard score {}.", org_entry.score);
         strncpy(dest_entry.score.data(), fmt::format("{}", org_entry.score).c_str(), FORMAT_SIZE);
       }
-      lboard.entries[org_entry.index] = dest_entry;
+      lboard.entries.insert_or_assign(org_entry.index, std::move(dest_entry));
       if (org_entry.username == username)
         lboard.player_index = org_entry.index;
     }
@@ -1274,7 +1285,7 @@ AchievementManager::ResponseType AchievementManager::FetchBoardInfo(AchievementI
 
   {
     std::lock_guard lg{m_lock};
-    m_leaderboard_map[leaderboard_id] = lboard;
+    m_leaderboard_map.insert_or_assign(leaderboard_id, std::move(lboard));
   }
 
   return ResponseType::SUCCESS;
@@ -1292,6 +1303,7 @@ void AchievementManager::ActivateDeactivateAchievement(AchievementId id, bool en
   const UnlockStatus& status = it->second;
   u32 index = status.game_data_index;
   bool active = (rc_runtime_get_achievement(&m_runtime, id) != nullptr);
+  bool hardcore_mode_enabled = Config::Get(Config::RA_HARDCORE_ENABLED);
 
   // Deactivate achievements if game is not loaded
   bool activate = m_is_game_loaded;
@@ -1329,23 +1341,22 @@ void AchievementManager::ActivateDeactivateAchievement(AchievementId id, bool en
     rc_runtime_deactivate_achievement(&m_runtime, id);
 }
 
-void AchievementManager::GenerateRichPresence()
+void AchievementManager::GenerateRichPresence(const Core::CPUThreadGuard& guard)
 {
-  Core::RunAsCPUThread([&] {
-    std::lock_guard lg{m_lock};
-    rc_runtime_get_richpresence(
-        &m_runtime, m_rich_presence.data(), RP_SIZE,
-        [](unsigned address, unsigned num_bytes, void* ud) {
-          return static_cast<AchievementManager*>(ud)->MemoryPeeker(address, num_bytes, ud);
-        },
-        this, nullptr);
-  });
+  std::lock_guard lg{m_lock};
+  rc_runtime_get_richpresence(
+      &m_runtime, m_rich_presence.data(), RP_SIZE,
+      [](unsigned address, unsigned num_bytes, void* ud) {
+        return static_cast<AchievementManager*>(ud)->MemoryPeeker(address, num_bytes, ud);
+      },
+      this, nullptr);
 }
 
 AchievementManager::ResponseType AchievementManager::AwardAchievement(AchievementId achievement_id)
 {
   std::string username = Config::Get(Config::RA_USERNAME);
   std::string api_token = Config::Get(Config::RA_API_TOKEN);
+  bool hardcore_mode_enabled = Config::Get(Config::RA_HARDCORE_ENABLED);
   rc_api_award_achievement_request_t award_request = {.username = username.c_str(),
                                                       .api_token = api_token.c_str(),
                                                       .achievement_id = achievement_id,
@@ -1415,7 +1426,7 @@ void AchievementManager::DisplayWelcomeMessage()
 {
   std::lock_guard lg{m_lock};
   PointSpread spread = TallyScore();
-  if (hardcore_mode_enabled)
+  if (Config::Get(Config::RA_HARDCORE_ENABLED))
   {
     OSD::AddMessage(
         fmt::format("You have {}/{} achievements worth {}/{} points", spread.hard_unlocks,
@@ -1440,6 +1451,7 @@ void AchievementManager::DisplayWelcomeMessage()
 
 void AchievementManager::HandleAchievementTriggeredEvent(const rc_runtime_event_t* runtime_event)
 {
+  bool hardcore_mode_enabled = Config::Get(Config::RA_HARDCORE_ENABLED);
   const auto event_id = runtime_event->id;
   auto it = m_unlock_map.find(event_id);
   if (it == m_unlock_map.end())
@@ -1448,7 +1460,6 @@ void AchievementManager::HandleAchievementTriggeredEvent(const rc_runtime_event_
     return;
   }
   it->second.session_unlock_count++;
-  m_queue.EmplaceItem([this, event_id] { AwardAchievement(event_id); });
   AchievementId game_data_index = it->second.game_data_index;
   OSD::AddMessage(fmt::format("Unlocked: {} ({})", m_game_data.achievements[game_data_index].title,
                               m_game_data.achievements[game_data_index].points),
@@ -1457,22 +1468,28 @@ void AchievementManager::HandleAchievementTriggeredEvent(const rc_runtime_event_
                   (Config::Get(Config::RA_BADGES_ENABLED)) ?
                       DecodeBadgeToOSDIcon(it->second.unlocked_badge.badge) :
                       nullptr);
-  PointSpread spread = TallyScore();
-  if (spread.hard_points == spread.total_points)
+  if (m_game_data.achievements[game_data_index].category == RC_ACHIEVEMENT_CATEGORY_CORE)
   {
-    OSD::AddMessage(
-        fmt::format("Congratulations! {} has mastered {}", m_display_name, m_game_data.title),
-        OSD::Duration::VERY_LONG, OSD::Color::YELLOW,
-        (Config::Get(Config::RA_BADGES_ENABLED)) ? DecodeBadgeToOSDIcon(m_game_badge.badge) :
-                                                   nullptr);
-  }
-  else if (spread.hard_points + spread.soft_points == spread.total_points)
-  {
-    OSD::AddMessage(
-        fmt::format("Congratulations! {} has completed {}", m_display_name, m_game_data.title),
-        OSD::Duration::VERY_LONG, OSD::Color::CYAN,
-        (Config::Get(Config::RA_BADGES_ENABLED)) ? DecodeBadgeToOSDIcon(m_game_badge.badge) :
-                                                   nullptr);
+    m_queue.EmplaceItem([this, event_id] { AwardAchievement(event_id); });
+    PointSpread spread = TallyScore();
+    if (spread.hard_points == spread.total_points &&
+        it->second.remote_unlock_status != UnlockStatus::UnlockType::HARDCORE)
+    {
+      OSD::AddMessage(
+          fmt::format("Congratulations! {} has mastered {}", m_display_name, m_game_data.title),
+          OSD::Duration::VERY_LONG, OSD::Color::YELLOW,
+          (Config::Get(Config::RA_BADGES_ENABLED)) ? DecodeBadgeToOSDIcon(m_game_badge.badge) :
+                                                     nullptr);
+    }
+    else if (spread.hard_points + spread.soft_points == spread.total_points &&
+             it->second.remote_unlock_status == UnlockStatus::UnlockType::LOCKED)
+    {
+      OSD::AddMessage(
+          fmt::format("Congratulations! {} has completed {}", m_display_name, m_game_data.title),
+          OSD::Duration::VERY_LONG, OSD::Color::CYAN,
+          (Config::Get(Config::RA_BADGES_ENABLED)) ? DecodeBadgeToOSDIcon(m_game_badge.badge) :
+                                                     nullptr);
+    }
   }
   ActivateDeactivateAchievement(event_id, Config::Get(Config::RA_ACHIEVEMENTS_ENABLED),
                                 Config::Get(Config::RA_UNOFFICIAL_ENABLED),
@@ -1501,7 +1518,7 @@ void AchievementManager::HandleAchievementProgressUpdatedEvent(
   }
   OSD::AddMessage(
       fmt::format("{} {}", m_game_data.achievements[game_data_index].title, value.data()),
-      OSD::Duration::VERY_LONG, OSD::Color::GREEN,
+      OSD::Duration::SHORT, OSD::Color::GREEN,
       (Config::Get(Config::RA_BADGES_ENABLED)) ?
           DecodeBadgeToOSDIcon(it->second.unlocked_badge.badge) :
           nullptr);
@@ -1590,8 +1607,7 @@ void AchievementManager::HandleLeaderboardTriggeredEvent(const rc_runtime_event_
       }
       m_queue.EmplaceItem([this, event_id] {
         FetchBoardInfo(event_id);
-        if (m_update_callback)
-          m_update_callback();
+        m_update_callback();
       });
       break;
     }
@@ -1628,10 +1644,8 @@ AchievementManager::ResponseType AchievementManager::Request(
     const std::string response_str(http_response->begin(), http_response->end());
     if (process_response(rc_response, response_str.c_str()) != RC_OK)
     {
-      ERROR_LOG_FMT(
-          ACHIEVEMENTS, "Failed to process HTTP response. \nURL: {} \npost_data: {} \nresponse: {}",
-          api_request.url, api_request.post_data == nullptr ? "NULL" : api_request.post_data,
-          response_str);
+      ERROR_LOG_FMT(ACHIEVEMENTS, "Failed to process HTTP response. \nURL: {} \nresponse: {}",
+                    api_request.url, response_str);
       return ResponseType::MALFORMED_OBJECT;
     }
     if (rc_response->response.succeeded)
@@ -1647,9 +1661,7 @@ AchievementManager::ResponseType AchievementManager::Request(
   }
   else
   {
-    WARN_LOG_FMT(ACHIEVEMENTS, "RetroAchievements connection failed. \nURL: {} \npost_data: {}",
-                 api_request.url,
-                 api_request.post_data == nullptr ? "NULL" : api_request.post_data);
+    WARN_LOG_FMT(ACHIEVEMENTS, "RetroAchievements connection failed. \nURL: {}", api_request.url);
     return ResponseType::CONNECTION_FAILED;
   }
 }

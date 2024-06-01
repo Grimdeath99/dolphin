@@ -19,6 +19,7 @@
 #include "VideoCommon/Assets/CustomAssetLoader.h"
 #include "VideoCommon/Assets/CustomTextureData.h"
 #include "VideoCommon/GraphicsModEditor/Controls/MeshExtractWindow.h"
+#include "VideoCommon/GraphicsModEditor/EditorBackend.h"
 #include "VideoCommon/GraphicsModEditor/EditorEvents.h"
 #include "VideoCommon/GraphicsModEditor/EditorState.h"
 #include "VideoCommon/GraphicsModEditor/EditorTypes.h"
@@ -28,6 +29,7 @@
 #include "VideoCommon/GraphicsModSystem/Config/GraphicsMod.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/Actions/CustomPipelineAction.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/Actions/ModifyLight.h"
+#include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h"
 #include "VideoCommon/HiresTextures.h"
 #include "VideoCommon/TextureCacheBase.h"
 #include "VideoCommon/VideoConfig.h"
@@ -96,6 +98,9 @@ void EditorMain::Shutdown()
   m_asset_browser_panel.reset();
   m_properties_panel.reset();
 
+  auto& system = Core::System::GetInstance();
+  system.GetGraphicsModManager().SetEditorBackend(nullptr);
+
   m_state.reset();
 
   m_has_changes = false;
@@ -122,106 +127,6 @@ void EditorMain::DrawImGui()
   {
     // ImGui::ShowDemoWindow();
   }
-}
-
-void EditorMain::AddDrawCall(DrawCallData draw_call)
-{
-  m_active_targets_panel->AddDrawCall(std::move(draw_call));
-}
-
-void EditorMain::AddFBCall(FBCallData fb_call)
-{
-  m_active_targets_panel->AddFBCall(std::move(fb_call));
-}
-
-void EditorMain::AddLightData(LightData light_data)
-{
-  m_active_targets_panel->AddLightData(std::move(light_data));
-}
-
-const std::vector<GraphicsModAction*>&
-EditorMain::GetProjectionActions(ProjectionType projection_type) const
-{
-  return m_empty_actions;
-}
-
-const std::vector<GraphicsModAction*>&
-EditorMain::GetProjectionTextureActions(ProjectionType projection_type,
-                                        const std::string& texture_name) const
-{
-  return m_empty_actions;
-}
-
-const std::vector<GraphicsModAction*>&
-EditorMain::GetDrawStartedActions(GraphicsMods::DrawCallID draw_call_id) const
-{
-  const OperationAndDrawCallID::Operation operation = OperationAndDrawCallID::Operation::Draw;
-  OperationAndDrawCallID lookup{operation, draw_call_id};
-
-  if (const auto it = m_state->m_editor_data.m_operation_and_draw_call_id_to_actions.find(lookup);
-      it != m_state->m_editor_data.m_operation_and_draw_call_id_to_actions.end())
-  {
-    return it->second;
-  }
-
-  if (const auto it = m_state->m_user_data.m_operation_and_draw_call_id_to_actions.find(lookup);
-      it != m_state->m_user_data.m_operation_and_draw_call_id_to_actions.end())
-  {
-    return it->second;
-  }
-
-  return m_empty_actions;
-}
-
-const std::vector<GraphicsModAction*>&
-EditorMain::GetTextureLoadActions(const std::string& texture_name) const
-{
-  // TODO
-
-  return m_empty_actions;
-}
-
-const std::vector<GraphicsModAction*>&
-EditorMain::GetTextureCreateActions(const std::string& texture_name) const
-{
-  // TODO
-
-  return m_empty_actions;
-}
-
-const std::vector<GraphicsModAction*>& EditorMain::GetEFBActions(const FBInfo& fb) const
-{
-  if (const auto it = m_state->m_editor_data.m_fb_call_id_to_actions.find(fb);
-      it != m_state->m_editor_data.m_fb_call_id_to_actions.end())
-  {
-    return it->second;
-  }
-
-  if (const auto it = m_state->m_user_data.m_fb_call_id_to_reference_actions.find(fb);
-      it != m_state->m_user_data.m_fb_call_id_to_reference_actions.end())
-  {
-    return it->second;
-  }
-
-  return m_empty_actions;
-}
-
-const std::vector<GraphicsModAction*>&
-EditorMain::GetLightActions(GraphicsMods::LightID light_id) const
-{
-  if (const auto it = m_state->m_editor_data.m_light_id_to_actions.find(light_id);
-      it != m_state->m_editor_data.m_light_id_to_actions.end())
-  {
-    return it->second;
-  }
-
-  if (const auto it = m_state->m_user_data.m_light_id_to_reference_actions.find(light_id);
-      it != m_state->m_user_data.m_light_id_to_reference_actions.end())
-  {
-    return it->second;
-  }
-
-  return m_empty_actions;
 }
 
 bool EditorMain::RebuildState()
@@ -336,6 +241,30 @@ bool EditorMain::RebuildState()
   m_state->m_editor_data.m_highlight_light_action = std::make_unique<ModifyLightAction>(
       float4{0, 0, 1, 0}, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
 
+  {
+    GraphicsModSystem::Config::GraphicsModTag tag;
+    tag.m_name = "Bloom";
+    tag.m_description = "Post processing effect that blurs out the brightest areas of the screen";
+    tag.m_color = Common::Vec3{0.66f, 0.63f, 0.16f};
+    m_state->m_editor_data.m_tags[tag.m_name] = tag;
+  }
+
+  {
+    GraphicsModSystem::Config::GraphicsModTag tag;
+    tag.m_name = "Depth of Field";
+    tag.m_description = "Post processing effect that blurs distant objects";
+    tag.m_color = Common::Vec3{0.8f, 0, 0};
+    m_state->m_editor_data.m_tags[tag.m_name] = tag;
+  }
+
+  {
+    GraphicsModSystem::Config::GraphicsModTag tag;
+    tag.m_name = "User Interface";
+    tag.m_description = "";
+    tag.m_color = Common::Vec3{0.01f, 0.04f, 0.99f};
+    m_state->m_editor_data.m_tags[tag.m_name] = tag;
+  }
+
   return true;
 }
 
@@ -356,6 +285,10 @@ void EditorMain::DrawMenu()
         {
           m_editor_session_in_progress = true;
           m_inspect_only = true;
+
+          auto& system = Core::System::GetInstance();
+          system.GetGraphicsModManager().SetEditorBackend(
+              std::make_unique<EditorBackend>(*m_state));
         }
         ImGui::EndMenu();
       }
@@ -527,6 +460,9 @@ bool EditorMain::NewMod(std::string_view name, std::string_view author,
 
   m_asset_browser_panel->ResetCurrentPath();
 
+  auto& system = Core::System::GetInstance();
+  system.GetGraphicsModManager().SetEditorBackend(std::make_unique<EditorBackend>(*m_state));
+
   return true;
 }
 
@@ -543,15 +479,16 @@ bool EditorMain::LoadMod(std::string_view name)
   if (!RebuildState())
     return false;
 
-  const auto config = GraphicsModConfig::Create(PathToString(mod_path / "metadata.json"),
-                                                GraphicsModConfig::Source::User);
+  const auto config =
+      GraphicsModSystem::Config::GraphicsMod::Create(PathToString(mod_path / "metadata.json"));
   if (!config)
   {
     // TODO: error
     return false;
   }
 
-  ReadFromGraphicsMod(&m_state->m_user_data, *config);
+  ReadFromGraphicsMod(&m_state->m_user_data, &m_state->m_editor_data, *config,
+                      PathToString(mod_path));
 
   auto& system = Core::System::GetInstance();
   auto& loader = system.GetCustomAssetLoader();
@@ -566,12 +503,13 @@ bool EditorMain::LoadMod(std::string_view name)
     }
   }
 
-  m_state->m_user_data.m_current_mod_path = mod_path;
   m_has_changes = false;
   m_editor_session_in_progress = true;
   m_inspect_only = false;
 
   m_asset_browser_panel->ResetCurrentPath();
+
+  system.GetGraphicsModManager().SetEditorBackend(std::make_unique<EditorBackend>(*m_state));
 
   return true;
 }
@@ -593,11 +531,11 @@ void EditorMain::Save()
 
   m_state->m_user_data.m_asset_library->SaveAssetDataAsFiles();
 
-  GraphicsModConfig mod;
+  GraphicsModSystem::Config::GraphicsMod mod;
   WriteToGraphicsMod(m_state->m_user_data, &mod);
 
   picojson::object serialized_root;
-  mod.SerializeToConfig(serialized_root);
+  mod.Serialize(serialized_root);
 
   const auto output = picojson::value{serialized_root}.serialize(true);
   json_stream << output;
@@ -614,6 +552,9 @@ void EditorMain::Close()
 
   m_editor_session_in_progress = false;
   m_inspect_only = false;
+
+  auto& system = Core::System::GetInstance();
+  system.GetGraphicsModManager().SetEditorBackend(nullptr);
 }
 
 void EditorMain::OnChangeOccured()
@@ -624,15 +565,5 @@ void EditorMain::OnChangeOccured()
 EditorState* EditorMain::GetEditorState() const
 {
   return m_state.get();
-}
-
-SceneDumper* EditorMain::GetSceneDumper() const
-{
-  if (m_state) [[likely]]
-  {
-    return &m_state->m_scene_dumper;
-  }
-
-  return nullptr;
 }
 }  // namespace GraphicsModEditor

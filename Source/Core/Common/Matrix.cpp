@@ -367,7 +367,7 @@ void Matrix44::Multiply(const Matrix44& a, const Vec4& vec, Vec4* result)
 
 float Matrix44::Determinant() const
 {
-  const auto m = data;
+  const auto& m = data;
   return m[12] * m[9] * m[6] * m[3] - m[8] * m[13] * m[6] * m[3] - m[12] * m[5] * m[10] * m[3] +
          m[4] * m[13] * m[10] * m[3] + m[8] * m[5] * m[14] * m[3] - m[4] * m[9] * m[14] * m[3] -
          m[12] * m[9] * m[2] * m[7] + m[8] * m[13] * m[2] * m[7] + m[12] * m[1] * m[10] * m[7] -

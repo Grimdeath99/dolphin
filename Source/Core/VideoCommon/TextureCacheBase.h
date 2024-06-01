@@ -27,6 +27,7 @@
 #include "VideoCommon/TextureConfig.h"
 #include "VideoCommon/TextureDecoder.h"
 #include "VideoCommon/TextureInfo.h"
+#include "VideoCommon/TextureUtils.h"
 #include "VideoCommon/VideoEvents.h"
 
 class AbstractFramebuffer;
@@ -167,7 +168,6 @@ struct TCacheEntry
   std::string texture_info_name = "";
 
   std::vector<VideoCommon::CachedAsset<VideoCommon::GameTextureAsset>> linked_game_texture_assets;
-  std::vector<VideoCommon::CachedAsset<VideoCommon::CustomAsset>> linked_asset_dependencies;
 
   explicit TCacheEntry(std::unique_ptr<AbstractTexture> tex,
                        std::unique_ptr<AbstractFramebuffer> fb);
@@ -462,7 +462,9 @@ private:
   void OnFrameEnd();
 
   Common::EventHook m_frame_event =
-      AfterFrameEvent::Register([this] { OnFrameEnd(); }, "TextureCache");
+      AfterFrameEvent::Register([this](Core::System&) { OnFrameEnd(); }, "TextureCache");
+
+  VideoCommon::TextureUtils::TextureDumper m_texture_dumper;
 };
 
 extern std::unique_ptr<TextureCacheBase> g_texture_cache;

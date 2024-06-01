@@ -23,8 +23,9 @@
 
 namespace Core
 {
+class CPUThreadGuard;
 class System;
-}
+}  // namespace Core
 
 namespace OSD
 {
@@ -89,6 +90,7 @@ public:
     u32 points = 0;
     BadgeStatus locked_badge;
     BadgeStatus unlocked_badge;
+    u32 category = RC_ACHIEVEMENT_CATEGORY_CORE;
   };
 
   static constexpr std::string_view GRAY = "transparent";
@@ -143,7 +145,7 @@ public:
   AchievementManager::ResponseType GetAchievementProgress(AchievementId achievement_id, u32* value,
                                                           u32* target);
   const std::unordered_map<AchievementId, LeaderboardStatus>& GetLeaderboardsInfo() const;
-  RichPresence GetRichPresence();
+  RichPresence GetRichPresence() const;
   bool IsDisabled() const { return m_disabled; };
   void SetDisabled(bool disabled);
   const NamedIconMap& GetChallengeIcons() const;
@@ -179,7 +181,7 @@ private:
   std::unique_ptr<DiscIO::Volume>& GetLoadingVolume() { return m_loading_volume; };
 
   void ActivateDeactivateAchievement(AchievementId id, bool enabled, bool unofficial, bool encore);
-  void GenerateRichPresence();
+  void GenerateRichPresence(const Core::CPUThreadGuard& guard);
 
   ResponseType AwardAchievement(AchievementId achievement_id);
   ResponseType SubmitLeaderboard(AchievementId leaderboard_id, int value);
@@ -204,7 +206,7 @@ private:
   rc_runtime_t m_runtime{};
   Core::System* m_system{};
   bool m_is_runtime_initialized = false;
-  UpdateCallback m_update_callback;
+  UpdateCallback m_update_callback = [] {};
   std::unique_ptr<DiscIO::Volume> m_loading_volume;
   bool m_disabled = false;
   std::string m_display_name;

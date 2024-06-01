@@ -23,7 +23,6 @@
 #include "VideoCommon/Fifo.h"
 #include "VideoCommon/FramebufferManager.h"
 #include "VideoCommon/FreeLookCamera.h"
-#include "VideoCommon/GraphicsModSystem/Config/GraphicsMod.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h"
 #include "VideoCommon/OnScreenDisplay.h"
 #include "VideoCommon/PixelShaderManager.h"
@@ -128,7 +127,7 @@ void VideoConfig::Refresh()
   sDumpEncoder = Config::Get(Config::GFX_DUMP_ENCODER);
   sDumpPath = Config::Get(Config::GFX_DUMP_PATH);
   iBitrateKbps = Config::Get(Config::GFX_BITRATE_KBPS);
-  bInternalResolutionFrameDumps = Config::Get(Config::GFX_INTERNAL_RESOLUTION_FRAME_DUMPS);
+  frame_dumps_resolution_type = Config::Get(Config::GFX_FRAME_DUMPS_RESOLUTION_TYPE);
   bEnableGPUTextureDecoding = Config::Get(Config::GFX_ENABLE_GPU_TEXTURE_DECODING);
   bPreferVSForLinePointExpansion = Config::Get(Config::GFX_PREFER_VS_FOR_LINE_POINT_EXPANSION);
   bEnablePixelLighting = Config::Get(Config::GFX_ENABLE_PIXEL_LIGHTING);
@@ -304,14 +303,16 @@ void CheckForConfigChanges()
 
   if (g_ActiveConfig.bGraphicMods && !old_graphics_mods_enabled)
   {
-    g_ActiveConfig.graphics_mod_config = GraphicsModGroupConfig(SConfig::GetInstance().GetGameID());
+    g_ActiveConfig.graphics_mod_config =
+        GraphicsModSystem::Config::GraphicsModGroup(SConfig::GetInstance().GetGameID());
     g_ActiveConfig.graphics_mod_config->Load();
   }
 
+  auto& system = Core::System::GetInstance();
   if (g_ActiveConfig.graphics_mod_config &&
       (old_game_mod_changes != g_ActiveConfig.graphics_mod_config->GetChangeCount()))
   {
-    g_graphics_mod_manager->Load(*g_ActiveConfig.graphics_mod_config);
+    system.GetGraphicsModManager().Load(*g_ActiveConfig.graphics_mod_config);
   }
 
   // Update texture cache settings with any changed options.
@@ -366,7 +367,6 @@ void CheckForConfigChanges()
 
   if (old_scale != g_framebuffer_manager->GetEFBScale())
   {
-    auto& system = Core::System::GetInstance();
     auto& pixel_shader_manager = system.GetPixelShaderManager();
     pixel_shader_manager.Dirty();
   }
@@ -395,5 +395,5 @@ void CheckForConfigChanges()
   // TODO: Move everything else to the ConfigChanged event
 }
 
-static Common::EventHook s_check_config_event =
-    AfterFrameEvent::Register([] { CheckForConfigChanges(); }, "CheckForConfigChanges");
+static Common::EventHook s_check_config_event = AfterFrameEvent::Register(
+    [](Core::System&) { CheckForConfigChanges(); }, "CheckForConfigChanges");

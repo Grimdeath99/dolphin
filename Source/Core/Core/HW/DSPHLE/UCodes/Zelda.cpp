@@ -11,7 +11,6 @@
 #include "Common/CommonTypes.h"
 #include "Common/Logging/Log.h"
 #include "Common/Swap.h"
-#include "Core/ConfigManager.h"
 #include "Core/HW/DSP.h"
 #include "Core/HW/DSPHLE/DSPHLE.h"
 #include "Core/HW/DSPHLE/MailHandler.h"
@@ -1549,7 +1548,7 @@ void ZeldaAudioRenderer::Resample(VPB* vpb, const s16* src, MixingBuffer* dst)
 
 void* ZeldaAudioRenderer::GetARAMPtr(u32 offset) const
 {
-  if (SConfig::GetInstance().bWii)
+  if (m_system.IsWii())
     return HLEMemory_Get_Pointer(m_system.GetMemory(), m_aram_base_addr + offset);
   else
     return reinterpret_cast<u8*>(m_system.GetDSP().GetARAMPtr()) + offset;
@@ -1736,6 +1735,7 @@ void ZeldaAudioRenderer::DecodeAFC(VPB* vpb, s16* dst, size_t block_count)
 
     if (vpb->samples_source_type == VPB::SRC_AFC_HQ_FROM_ARAM)
     {
+      // 4-bit samples
       for (size_t i = 0; i < 16; i += 2)
       {
         nibbles[i + 0] = *src >> 4;
@@ -1743,14 +1743,11 @@ void ZeldaAudioRenderer::DecodeAFC(VPB* vpb, s16* dst, size_t block_count)
         src++;
       }
       for (auto& nibble : nibbles)
-      {
-        if (nibble >= 8)
-          nibble -= 16;
-        nibble <<= 11;
-      }
+        nibble = s16(nibble << 12) >> 1;
     }
     else
     {
+      // 2-bit samples
       for (size_t i = 0; i < 16; i += 4)
       {
         nibbles[i + 0] = (*src >> 6) & 3;
@@ -1760,11 +1757,7 @@ void ZeldaAudioRenderer::DecodeAFC(VPB* vpb, s16* dst, size_t block_count)
         src++;
       }
       for (auto& nibble : nibbles)
-      {
-        if (nibble >= 2)
-          nibble -= 4;
-        nibble <<= 13;
-      }
+        nibble = s16(nibble << 14) >> 1;
     }
 
     s32 yn1 = *vpb->AFCYN1(), yn2 = *vpb->AFCYN2();

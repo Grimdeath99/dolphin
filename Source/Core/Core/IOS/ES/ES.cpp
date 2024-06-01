@@ -131,15 +131,15 @@ void ESDevice::InitializeEmulationState(CoreTiming::CoreTimingManager& core_timi
 {
   s_finish_init_event =
       core_timing.RegisterEvent("IOS-ESFinishInit", [](Core::System& system_, u64, s64) {
-        GetIOS()->GetESDevice()->FinishInit();
+        system_.GetIOS()->GetESDevice()->FinishInit();
       });
   s_reload_ios_for_ppc_launch_event = core_timing.RegisterEvent(
       "IOS-ESReloadIOSForPPCLaunch", [](Core::System& system_, u64 ios_id, s64) {
-        GetIOS()->GetESDevice()->LaunchTitle(ios_id, HangPPC::Yes);
+        system_.GetIOS()->GetESDevice()->LaunchTitle(ios_id, HangPPC::Yes);
       });
   s_bootstrap_ppc_for_launch_event =
       core_timing.RegisterEvent("IOS-ESBootstrapPPCForLaunch", [](Core::System& system_, u64, s64) {
-        GetIOS()->GetESDevice()->BootstrapPPC();
+        system_.GetIOS()->GetESDevice()->BootstrapPPC();
       });
 }
 
@@ -982,7 +982,8 @@ IPCReply ESDevice::SetUpStreamKey(const Context& context, const IOCtlVRequest& r
 
   u32 handle;
   const ReturnCode ret = m_core.SetUpStreamKey(
-      context.uid, memory.GetPointer(request.in_vectors[0].address), tmd, &handle);
+      context.uid, memory.GetPointerForRange(request.in_vectors[0].address, sizeof(ES::TicketView)),
+      tmd, &handle);
   memory.Write_U32(handle, request.io_vectors[0].address);
   return IPCReply(ret);
 }

@@ -517,8 +517,9 @@ bool EditorAssetSource::RenameAsset(const std::filesystem::path& old_path,
   return true;
 }
 
-void EditorAssetSource::AddAssets(std::span<const GraphicsModAssetConfig> assets,
-                                  const std::filesystem::path& root)
+void EditorAssetSource::AddAssets(
+    std::span<const GraphicsModSystem::Config::GraphicsModAsset> assets,
+    const std::filesystem::path& root)
 {
   for (const auto& asset : assets)
   {
@@ -529,14 +530,14 @@ void EditorAssetSource::AddAssets(std::span<const GraphicsModAssetConfig> assets
   }
 }
 
-std::vector<GraphicsModAssetConfig>
+std::vector<GraphicsModSystem::Config::GraphicsModAsset>
 EditorAssetSource::GetAssets(const std::filesystem::path& root) const
 {
   std::lock_guard lk(m_asset_lock);
-  std::vector<GraphicsModAssetConfig> assets;
+  std::vector<GraphicsModSystem::Config::GraphicsModAsset> assets;
   for (const auto& [asset_id, path] : m_asset_id_to_file_path)
   {
-    GraphicsModAssetConfig asset_config;
+    GraphicsModSystem::Config::GraphicsModAsset asset_config;
     asset_config.m_asset_id = asset_id;
     if (const auto it = m_path_to_editor_asset.find(path); it != m_path_to_editor_asset.end())
     {
@@ -604,7 +605,7 @@ void EditorAssetSource::SaveAssetDataAsFiles() const
                          metadata_it != asset.m_asset_map.end())
                      {
                        picojson::object serialized_root;
-                       VideoCommon::MeshData::ToJson(&serialized_root, *mesh_data);
+                       VideoCommon::MeshData::ToJson(serialized_root, *mesh_data);
                        save_json_to_file(PathToString(metadata_it->second), serialized_root);
                      }
                    }},
