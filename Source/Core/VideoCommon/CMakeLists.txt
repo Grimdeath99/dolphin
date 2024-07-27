@@ -20,12 +20,19 @@ add_library(videocommon
   Assets/DirectFilesystemAssetLibrary.h
   Assets/MaterialAsset.cpp
   Assets/MaterialAsset.h
+  Assets/MaterialAssetUtils.cpp
+  Assets/MaterialAssetUtils.h
   Assets/MeshAsset.cpp
   Assets/MeshAsset.h
   Assets/ShaderAsset.cpp
   Assets/ShaderAsset.h
   Assets/TextureAsset.cpp
   Assets/TextureAsset.h
+  Assets/TextureSamplerValue.cpp
+  Assets/TextureSamplerValue.h
+  Assets/Types.h
+  Assets/WatchableFilesystemAssetLibrary.cpp
+  Assets/WatchableFilesystemAssetLibrary.h
   AsyncRequests.cpp
   AsyncRequests.h
   AsyncShaderCompiler.cpp
@@ -68,6 +75,8 @@ add_library(videocommon
   GraphicsModEditor/Controls/AssetDisplay.h
   GraphicsModEditor/Controls/MaterialControl.cpp
   GraphicsModEditor/Controls/MaterialControl.h
+  GraphicsModEditor/Controls/MaterialGenerateWindow.cpp
+  GraphicsModEditor/Controls/MaterialGenerateWindow.h
   GraphicsModEditor/Controls/MeshControl.cpp
   GraphicsModEditor/Controls/MeshControl.h
   GraphicsModEditor/Controls/MeshExtractWindow.cpp
@@ -87,11 +96,15 @@ add_library(videocommon
   GraphicsModEditor/EditorBackend.cpp
   GraphicsModEditor/EditorBackend.h
   GraphicsModEditor/EditorEvents.h
+  GraphicsModEditor/EditorFilter.cpp
+  GraphicsModEditor/EditorFilter.h
   GraphicsModEditor/EditorMain.cpp
   GraphicsModEditor/EditorMain.h
   GraphicsModEditor/EditorState.cpp
   GraphicsModEditor/EditorState.h
   GraphicsModEditor/EditorTypes.h
+  GraphicsModEditor/MaterialGeneration.cpp
+  GraphicsModEditor/MaterialGeneration.h
   GraphicsModEditor/Panels/ActiveTargetsPanel.cpp
   GraphicsModEditor/Panels/ActiveTargetsPanel.h
   GraphicsModEditor/Panels/AssetBrowserPanel.cpp
@@ -135,6 +148,8 @@ add_library(videocommon
   GraphicsModSystem/Runtime/CustomPipeline.h
   GraphicsModSystem/Runtime/CustomShaderCache.cpp
   GraphicsModSystem/Runtime/CustomShaderCache.h
+  GraphicsModSystem/Runtime/CustomTextureCache.cpp
+  GraphicsModSystem/Runtime/CustomTextureCache.h
   GraphicsModSystem/Runtime/FBInfo.cpp
   GraphicsModSystem/Runtime/FBInfo.h
   GraphicsModSystem/Runtime/GraphicsModAction.h
@@ -264,11 +279,12 @@ PUBLIC
 PRIVATE
   fmt::fmt
   spng::spng
-  xxhash
+  xxhash::xxhash
   imgui
   implot
   glslang
   tinygltf
+  watcher
 )
 
 if(_M_X86_64)

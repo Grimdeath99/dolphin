@@ -59,6 +59,7 @@ struct Texture
 {
   TextureType texture_type = TextureType::Normal;
   std::string hash_name;
+  u8 unit = 0;
 };
 
 struct DrawDataView
@@ -69,6 +70,7 @@ struct DrawDataView
   std::span<const float4> gpu_skinning_normal_transform;
   NativeVertexFormat* vertex_format = nullptr;
   Common::SmallVector<TextureView, 8> textures;
+  std::array<SamplerState, 8> samplers;
 
   ProjectionType projection_type;
   RasterizationState rasterization_state;
@@ -79,6 +81,10 @@ struct DrawDataView
 struct DrawData
 {
   Common::SmallVector<Texture, 8> textures;
+  std::array<SamplerState, 8> samplers;
+
+  std::size_t vertex_count = 0;
+  std::size_t index_count = 0;
 
   ProjectionType projection_type;
   RasterizationState rasterization_state;

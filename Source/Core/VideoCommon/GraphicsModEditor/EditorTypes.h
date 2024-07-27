@@ -96,7 +96,7 @@ struct EditorAsset
   EditorAssetData m_data;
   AssetDataType m_data_type;
   VideoCommon::CustomAssetLibrary::TimeType m_last_data_write;
-  VideoCommon::DirectFilesystemAssetLibrary::AssetMap m_asset_map;
+  VideoCommon::Assets::AssetMap m_asset_map;
   bool m_valid = false;
 };
 

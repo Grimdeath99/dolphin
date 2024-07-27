@@ -53,7 +53,7 @@ void MeshControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& asse
         if (AssetDisplay(mesh_material, &m_state, &material_asset_id, AssetDataType::Material))
         {
           *last_data_write = std::chrono::system_clock::now();
-          GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+          GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(material_asset_id);
         }
       }
       ImGui::EndTable();

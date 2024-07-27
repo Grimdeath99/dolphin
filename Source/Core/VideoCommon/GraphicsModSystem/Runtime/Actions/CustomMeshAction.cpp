@@ -13,10 +13,12 @@
 #include "VideoCommon/GraphicsModEditor/Controls/AssetDisplay.h"
 #include "VideoCommon/GraphicsModEditor/EditorEvents.h"
 #include "VideoCommon/GraphicsModEditor/EditorMain.h"
+#include "VideoCommon/GraphicsModSystem/Runtime/CustomTextureCache.h"
 
 std::unique_ptr<CustomMeshAction>
 CustomMeshAction::Create(const picojson::value& json_data,
-                         std::shared_ptr<VideoCommon::CustomAssetLibrary> library)
+                         std::shared_ptr<VideoCommon::CustomAssetLibrary> library,
+                         std::shared_ptr<VideoCommon::CustomTextureCache> texture_cache)
 {
   VideoCommon::CustomAssetLibrary::AssetID mesh_asset;
 
@@ -60,23 +62,25 @@ CustomMeshAction::Create(const picojson::value& json_data,
     }
   }
 
-  return std::make_unique<CustomMeshAction>(std::move(library), std::move(rotation),
-                                            std::move(scale), std::move(translation),
-                                            std::move(mesh_asset));
+  return std::make_unique<CustomMeshAction>(std::move(library), std::move(texture_cache),
+                                            std::move(rotation), std::move(scale),
+                                            std::move(translation), std::move(mesh_asset));
 }
 
-CustomMeshAction::CustomMeshAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library)
-    : m_library(std::move(library))
+CustomMeshAction::CustomMeshAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library,
+                                   std::shared_ptr<VideoCommon::CustomTextureCache> texture_cache)
+    : m_library(std::move(library)), m_texture_cache(std::move(texture_cache))
 {
 }
 
 CustomMeshAction::CustomMeshAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library,
+                                   std::shared_ptr<VideoCommon::CustomTextureCache> texture_cache,
                                    Common::Vec3 rotation, Common::Vec3 scale,
                                    Common::Vec3 translation,
                                    VideoCommon::CustomAssetLibrary::AssetID mesh_asset_id)
-    : m_library(std::move(library)), m_mesh_asset_id(std::move(mesh_asset_id)),
-      m_scale(std::move(scale)), m_rotation(std::move(rotation)),
-      m_translation(std::move(translation))
+    : m_library(std::move(library)), m_texture_cache(std::move(texture_cache)),
+      m_mesh_asset_id(std::move(mesh_asset_id)), m_scale(std::move(scale)),
+      m_rotation(std::move(rotation)), m_translation(std::move(translation))
 {
 }
 
@@ -107,9 +111,9 @@ void CustomMeshAction::OnDrawStarted(GraphicsModActionData::DrawStarted* draw_st
 
   if (m_recalculate_original_mesh_center)
   {
-    auto vert_ptr = draw_started->original_mesh_data.data();
+    auto vert_ptr = draw_started->draw_data_view.vertex_data.data();
     Common::Vec3 center_point{};
-    for (std::size_t vert_index = 0; vert_index < draw_started->original_mesh_data.size();
+    for (std::size_t vert_index = 0; vert_index < draw_started->draw_data_view.vertex_data.size();
          vert_index++)
     {
       float vx = 0;
@@ -124,11 +128,11 @@ void CustomMeshAction::OnDrawStarted(GraphicsModActionData::DrawStarted* draw_st
       std::memcpy(&vz, vert_ptr + sizeof(float) * 2, sizeof(float));
       center_point.z += vz;
 
-      vert_ptr += draw_started->current_vertex_format.GetVertexStride();
+      vert_ptr += draw_started->draw_data_view.vertex_format->GetVertexStride();
     }
-    center_point.x /= draw_started->original_mesh_data.size();
-    center_point.y /= draw_started->original_mesh_data.size();
-    center_point.z /= draw_started->original_mesh_data.size();
+    center_point.x /= draw_started->draw_data_view.vertex_data.size();
+    center_point.y /= draw_started->draw_data_view.vertex_data.size();
+    center_point.z /= draw_started->draw_data_view.vertex_data.size();
     m_original_mesh_center = center_point;
   }
 
@@ -157,7 +161,8 @@ void CustomMeshAction::OnDrawStarted(GraphicsModActionData::DrawStarted* draw_st
     {
       RenderChunk render_chunk;
       PortableVertexDeclaration vertex_declaration = mesh_chunk.vertex_declaration;
-      vertex_declaration.posmtx = draw_started->current_vertex_format.GetVertexDeclaration().posmtx;
+      vertex_declaration.posmtx =
+          draw_started->draw_data_view.vertex_format->GetVertexDeclaration().posmtx;
       render_chunk.m_native_vertex_format = g_gfx->CreateNativeVertexFormat(vertex_declaration);
       render_chunk.m_mesh_chunk.index_data =
           std::span<u16>(mesh_chunk.indices.get(), mesh_chunk.num_indices);
@@ -176,19 +181,30 @@ void CustomMeshAction::OnDrawStarted(GraphicsModActionData::DrawStarted* draw_st
       const auto scale = Common::Matrix33::Scale(m_scale);
       const auto rotation = Common::Quaternion::RotateXYZ(m_rotation);
 
-      const auto mesh_chunk_center =
-          (mesh_chunk.minimum_position + mesh_chunk.maximum_position) / 2.0f;
-      render_chunk.m_mesh_chunk.transform =
-          Common::Matrix44::Translate(m_original_mesh_center - mesh_chunk_center) *
-          Common::Matrix44::FromMatrix33(scale) * Common::Matrix44::FromQuaternion(rotation) *
-          Common::Matrix44::Translate(m_translation) * mesh_chunk.transform;
+      if (m_ignore_mesh_transform)
+      {
+        render_chunk.m_mesh_chunk.transform = Common::Matrix44::FromMatrix33(scale) *
+                                              Common::Matrix44::FromQuaternion(rotation) *
+                                              Common::Matrix44::Translate(m_translation);
+      }
+      else
+      {
+        const auto mesh_chunk_center =
+            (mesh_chunk.minimum_position + mesh_chunk.maximum_position) / 2.0f;
+        render_chunk.m_mesh_chunk.transform =
+            Common::Matrix44::Translate(m_original_mesh_center - mesh_chunk_center) *
+            Common::Matrix44::FromMatrix33(scale) * Common::Matrix44::FromQuaternion(rotation) *
+            Common::Matrix44::Translate(m_translation) * mesh_chunk.transform;
+      }
 
       for (std::size_t i = 0; i < vertex_declaration.texcoords.size(); i++)
       {
         auto& texcoord = vertex_declaration.texcoords[i];
         if (texcoord.enable)
         {
-          render_chunk.m_tex_units.push_back(static_cast<u32>(i));
+          GraphicsModSystem::TextureView texture_view;
+          texture_view.unit = static_cast<u8>(i);
+          render_chunk.m_textures.push_back(texture_view);
         }
       }
 
@@ -198,21 +214,27 @@ void CustomMeshAction::OnDrawStarted(GraphicsModActionData::DrawStarted* draw_st
     m_mesh_asset_changed = false;
   }
 
+  if (m_render_chunks.empty() || mesh_data->m_mesh_chunks.empty())
+    return;
+
   auto& curr_render_chunk = m_render_chunks[*draw_started->current_mesh_index];
   const auto& curr_mesh_chunk = mesh_data->m_mesh_chunks[*draw_started->current_mesh_index];
 
   curr_render_chunk.m_custom_pipeline.UpdatePixelData(
-      loader, m_library, curr_render_chunk.m_tex_units,
+      loader, m_library, m_texture_cache, curr_render_chunk.m_textures, {},
       mesh_data->m_mesh_material_to_material_asset_id[curr_mesh_chunk.material_name]);
 
   *draw_started->mesh_chunk = curr_render_chunk.m_mesh_chunk;
-  CustomPixelShader custom_pixel_shader;
-  custom_pixel_shader.custom_shader =
-      curr_render_chunk.m_custom_pipeline.m_last_generated_shader_code.GetBuffer();
-  custom_pixel_shader.material_uniform_block =
-      curr_render_chunk.m_custom_pipeline.m_last_generated_material_code.GetBuffer();
-  *draw_started->custom_pixel_shader = custom_pixel_shader;
-  *draw_started->material_uniform_buffer = curr_render_chunk.m_custom_pipeline.m_material_data;
+  if (!m_use_game_material)
+  {
+    CustomPixelShader custom_pixel_shader;
+    custom_pixel_shader.custom_shader =
+        curr_render_chunk.m_custom_pipeline.m_last_generated_shader_code.GetBuffer();
+    custom_pixel_shader.material_uniform_block =
+        curr_render_chunk.m_custom_pipeline.m_last_generated_material_code.GetBuffer();
+    *draw_started->custom_pixel_shader = custom_pixel_shader;
+    *draw_started->material_uniform_buffer = curr_render_chunk.m_custom_pipeline.m_material_data;
+  }
 
   (*draw_started->current_mesh_index)++;
   if (*draw_started->current_mesh_index < mesh_data->m_mesh_chunks.size())
@@ -235,7 +257,7 @@ void CustomMeshAction::DrawImGui()
       if (GraphicsModEditor::Controls::AssetDisplay("MeshValue", editor.GetEditorState(),
                                                     &m_mesh_asset_id, GraphicsModEditor::Mesh))
       {
-        GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+        GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(m_mesh_asset_id);
         m_mesh_asset_changed = true;
       }
       ImGui::EndTable();
@@ -272,6 +294,29 @@ void CustomMeshAction::DrawImGui()
         GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
         m_transform_changed = true;
       }
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("Ignore Mesh Transform");
+      ImGui::TableNextColumn();
+      ImGui::SetTooltip(
+          "Ignore any set mesh transform and use only apply the game's transform, this "
+          "can be useful when making simple model edits with mesh dumped from Dolphin");
+      if (ImGui::Checkbox("##IgnoreMeshTransform", &m_ignore_mesh_transform))
+      {
+        GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+        m_transform_changed = true;
+      }
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("Use Game Material");
+      ImGui::TableNextColumn();
+      ImGui::SetTooltip(
+          "Ignore any set mesh material and use the game's material instead, this "
+          "can be useful when making simple model or uv (leveraging a custom texture) edits");
+      if (ImGui::Checkbox("##UseGameMaterial", &m_use_game_material))
+      {
+        GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+      }
       ImGui::EndTable();
     }
   }
@@ -287,9 +332,10 @@ void CustomMeshAction::SerializeToConfig(picojson::object* obj)
   json_obj.emplace("scale", ToJsonObject(m_scale));
   json_obj.emplace("rotation", ToJsonObject(m_rotation));
   json_obj.emplace("mesh_asset", m_mesh_asset_id);
+  json_obj.emplace("ignore_mesh_transform", m_ignore_mesh_transform);
 }
 
 std::string CustomMeshAction::GetFactoryName() const
 {
-  return "custom_mesh";
+  return std::string{factory_name};
 }

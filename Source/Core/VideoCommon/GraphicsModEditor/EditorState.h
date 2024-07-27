@@ -23,6 +23,7 @@
 #include "VideoCommon/GraphicsModEditor/SceneDumper.h"
 #include "VideoCommon/GraphicsModSystem/Config/GraphicsModHashPolicy.h"
 #include "VideoCommon/GraphicsModSystem/Config/GraphicsModTag.h"
+#include "VideoCommon/GraphicsModSystem/Runtime/CustomTextureCache.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModAction.h"
 #include "VideoCommon/GraphicsModSystem/Types.h"
 
@@ -40,6 +41,9 @@ struct EditorData
 
   // An action used by the editor to highlight selected lights
   std::unique_ptr<GraphicsModAction> m_highlight_light_action;
+
+  // An action used by the editor to display lighting
+  std::unique_ptr<GraphicsModAction> m_simple_light_visualization_action;
 
   // A map of editor specific textures accessible by name
   std::map<std::string, std::unique_ptr<AbstractTexture>> m_name_to_texture;
@@ -59,6 +63,10 @@ struct EditorData
       m_assets_waiting_for_preview;
 
   std::shared_ptr<VideoCommon::DirectFilesystemAssetLibrary> m_asset_library;
+
+  bool m_disable_all_actions = false;
+
+  bool m_view_lighting = false;
 
   u64 m_next_action_id = 1;
 };
@@ -104,10 +112,6 @@ struct UserData
   // The asset library provided to all user actions
   std::shared_ptr<EditorAssetSource> m_asset_library;
 };
-void WriteToGraphicsMod(const UserData& user_data, GraphicsModSystem::Config::GraphicsMod* config);
-void ReadFromGraphicsMod(UserData* user_data, EditorData* editor_data,
-                         const GraphicsModSystem::Config::GraphicsMod& config,
-                         const std::string& mod_root);
 
 struct RuntimeState
 {
@@ -150,6 +154,9 @@ struct RuntimeState
 
   // Mapping the game light id to the last known data
   std::map<GraphicsModSystem::LightID, LightData> m_light_id_to_data;
+
+  // Texture cache management
+  std::shared_ptr<VideoCommon::CustomTextureCache> m_texture_cache;
 };
 
 struct EditorState
@@ -159,4 +166,11 @@ struct EditorState
   RuntimeState m_runtime_data;
   SceneDumper m_scene_dumper;
 };
+
+void WriteToGraphicsMod(const UserData& user_data, GraphicsModSystem::Config::GraphicsMod* config);
+void ReadFromGraphicsMod(UserData* user_data, EditorData* editor_data,
+                         const RuntimeState& runtime_state,
+                         const GraphicsModSystem::Config::GraphicsMod& config,
+                         const std::string& mod_root);
+
 }  // namespace GraphicsModEditor

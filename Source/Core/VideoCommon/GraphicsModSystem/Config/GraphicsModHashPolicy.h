@@ -10,9 +10,9 @@
 
 namespace GraphicsModSystem::Config
 {
+constexpr u16 NoHashAttributes = 0;
 enum class HashAttributes : u16
 {
-  NoAttributes = 1u << 0,
   Blending = 1u << 1,
   Projection = 1u << 2,
   VertexPosition = 1u << 3,
@@ -24,6 +24,7 @@ enum class HashAttributes : u16
 struct HashPolicy
 {
   HashAttributes attributes;
+  bool first_texture_only;
   u64 version;
 };
 

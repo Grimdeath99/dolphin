@@ -10,7 +10,9 @@
 #include <imgui.h>
 
 #include "Common/CommonPaths.h"
+#include "Common/EnumUtils.h"
 #include "Common/FileUtil.h"
+#include "Common/JsonUtil.h"
 #include "Core/ConfigManager.h"
 #include "Core/System.h"
 
@@ -29,6 +31,7 @@
 #include "VideoCommon/GraphicsModSystem/Config/GraphicsMod.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/Actions/CustomPipelineAction.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/Actions/ModifyLight.h"
+#include "VideoCommon/GraphicsModSystem/Runtime/CustomTextureCache.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModManager.h"
 #include "VideoCommon/HiresTextures.h"
 #include "VideoCommon/TextureCacheBase.h"
@@ -139,9 +142,10 @@ bool EditorMain::RebuildState()
   m_state->m_user_data.m_asset_library = std::make_shared<EditorAssetSource>();
   m_state->m_editor_data.m_asset_library =
       std::make_shared<VideoCommon::DirectFilesystemAssetLibrary>();
+  m_state->m_editor_data.m_asset_library->Watch(File::GetSysDirectory() + GRAPHICSMODEDITOR_DIR);
+  m_state->m_runtime_data.m_texture_cache = std::make_shared<VideoCommon::CustomTextureCache>();
   m_change_occurred_event =
       EditorEvents::ChangeOccurredEvent::Register([this] { OnChangeOccured(); }, "EditorMain");
-
   const std::string textures_path_root =
       File::GetSysDirectory() + GRAPHICSMODEDITOR_DIR + "/Textures";
   if (!AddTextureToResources(fmt::format("{}/icons8-portraits-50.png", textures_path_root),
@@ -207,36 +211,79 @@ bool EditorMain::RebuildState()
     return false;
   }
 
-  const std::string pipeline_path_root =
-      File::GetSysDirectory() + GRAPHICSMODEDITOR_DIR + "/Pipelines";
-  const std::filesystem::path pipeline_path_root_fs{pipeline_path_root};
-
-  VideoCommon::DirectFilesystemAssetLibrary::AssetMap shader_asset_map;
-  shader_asset_map.try_emplace("metadata",
-                               pipeline_path_root_fs / "highlight" / "color.shader.json");
-  shader_asset_map.try_emplace("shader", pipeline_path_root_fs / "highlight" / "color.glsl");
-  m_state->m_editor_data.m_asset_library->SetAssetIDMapData("highlight_shader",
-                                                            std::move(shader_asset_map));
-
-  VideoCommon::DirectFilesystemAssetLibrary::AssetMap material_asset_map;
-  material_asset_map.try_emplace("", pipeline_path_root_fs / "highlight" / "material.json");
-  m_state->m_editor_data.m_asset_library->SetAssetIDMapData("highlight_material",
-                                                            std::move(material_asset_map));
-
   auto& system = Core::System::GetInstance();
   auto& asset_loader = system.GetCustomAssetLoader();
   asset_loader.Reset();
 
-  m_state->m_editor_data.m_assets.push_back(
-      asset_loader.LoadPixelShader("highlight_shader", m_state->m_editor_data.m_asset_library));
-  m_state->m_editor_data.m_assets.push_back(
-      asset_loader.LoadMaterial("highlight_material", m_state->m_editor_data.m_asset_library));
+  m_asset_reload_event = EditorEvents::AssetReloadEvent::Register(
+      [&asset_loader, this](const VideoCommon::CustomAssetLibrary::AssetID& asset_id) {
+        asset_loader.ReloadAsset(asset_id);
+        OnChangeOccured();
+      },
+      "EditorMain");
 
-  std::vector<CustomPipelineAction::PipelinePassPassDescription> passes;
-  passes.emplace_back().m_pixel_material_asset = "highlight_material";
+  const std::string pipeline_path_root =
+      File::GetSysDirectory() + GRAPHICSMODEDITOR_DIR + "/Pipelines";
+  const std::filesystem::path pipeline_path_root_fs{pipeline_path_root};
 
-  m_state->m_editor_data.m_highlight_action = std::make_unique<CustomPipelineAction>(
-      m_state->m_editor_data.m_asset_library, std::move(passes));
+  {
+    VideoCommon::Assets::AssetMap highlight_shader_asset_map;
+    highlight_shader_asset_map.try_emplace("metadata", pipeline_path_root_fs / "highlight" /
+                                                           "color.shader.json");
+    highlight_shader_asset_map.try_emplace("shader",
+                                           pipeline_path_root_fs / "highlight" / "color.glsl");
+    m_state->m_editor_data.m_asset_library->SetAssetIDMapData(
+        "highlight_shader", std::move(highlight_shader_asset_map));
+
+    VideoCommon::Assets::AssetMap highlight_material_asset_map;
+    highlight_material_asset_map.try_emplace("",
+                                             pipeline_path_root_fs / "highlight" / "material.json");
+    m_state->m_editor_data.m_asset_library->SetAssetIDMapData(
+        "highlight_material", std::move(highlight_material_asset_map));
+
+    m_state->m_editor_data.m_assets.push_back(
+        asset_loader.LoadPixelShader("highlight_shader", m_state->m_editor_data.m_asset_library));
+    m_state->m_editor_data.m_assets.push_back(
+        asset_loader.LoadMaterial("highlight_material", m_state->m_editor_data.m_asset_library));
+
+    std::vector<CustomPipelineAction::PipelinePassPassDescription> passes;
+    passes.emplace_back().m_pixel_material_asset = "highlight_material";
+
+    m_state->m_editor_data.m_highlight_action = std::make_unique<CustomPipelineAction>(
+        m_state->m_editor_data.m_asset_library, m_state->m_runtime_data.m_texture_cache,
+        std::move(passes));
+  }
+
+  {
+    VideoCommon::Assets::AssetMap simple_light_visual_shader_asset_map;
+    simple_light_visual_shader_asset_map.try_emplace("metadata",
+                                                     pipeline_path_root_fs / "light_visualization" /
+                                                         "simple-light-visualization.shader");
+    simple_light_visual_shader_asset_map.try_emplace("shader",
+                                                     pipeline_path_root_fs / "light_visualization" /
+                                                         "simple-light-visualization.glsl");
+    m_state->m_editor_data.m_asset_library->SetAssetIDMapData(
+        "simple_light_visualization_shader", std::move(simple_light_visual_shader_asset_map));
+
+    VideoCommon::Assets::AssetMap simple_light_visual_material_asset_map;
+    simple_light_visual_material_asset_map.try_emplace(
+        "", pipeline_path_root_fs / "light_visualization" / "simple-light-visualization.material");
+    m_state->m_editor_data.m_asset_library->SetAssetIDMapData(
+        "simple_light_visualization_material", std::move(simple_light_visual_material_asset_map));
+
+    m_state->m_editor_data.m_assets.push_back(asset_loader.LoadPixelShader(
+        "simple_light_visualization_shader", m_state->m_editor_data.m_asset_library));
+    m_state->m_editor_data.m_assets.push_back(asset_loader.LoadMaterial(
+        "simple_light_visualization_material", m_state->m_editor_data.m_asset_library));
+
+    std::vector<CustomPipelineAction::PipelinePassPassDescription> passes;
+    passes.emplace_back().m_pixel_material_asset = "simple_light_visualization_material";
+
+    m_state->m_editor_data.m_simple_light_visualization_action =
+        std::make_unique<CustomPipelineAction>(m_state->m_editor_data.m_asset_library,
+                                               m_state->m_runtime_data.m_texture_cache,
+                                               std::move(passes));
+  }
 
   m_state->m_editor_data.m_highlight_light_action = std::make_unique<ModifyLightAction>(
       float4{0, 0, 1, 0}, std::nullopt, std::nullopt, std::nullopt, std::nullopt);
@@ -286,6 +333,7 @@ void EditorMain::DrawMenu()
           m_editor_session_in_progress = true;
           m_inspect_only = true;
 
+          RebuildState();
           auto& system = Core::System::GetInstance();
           system.GetGraphicsModManager().SetEditorBackend(
               std::make_unique<EditorBackend>(*m_state));
@@ -335,14 +383,51 @@ void EditorMain::DrawMenu()
     {
       if (ImGui::MenuItem("Export Scene As Mesh", nullptr, false, m_editor_session_in_progress))
       {
-        if (!m_open_mesh_dump_export_window)
-        {
-          for (const auto& [draw_call_id, data] : m_state->m_runtime_data.m_draw_call_id_to_data)
-          {
-            m_last_mesh_dump_request.m_draw_call_ids.insert(draw_call_id);
-          }
-        }
         m_open_mesh_dump_export_window = true;
+      }
+      if (ImGui::MenuItem("Export Scene Metadata As JSON", nullptr, false,
+                          m_editor_session_in_progress))
+      {
+        picojson::array data_objects;
+        for (const auto& [draw_call_id, data] : m_state->m_runtime_data.m_draw_call_id_to_data)
+        {
+          picojson::object obj;
+          obj.emplace("draw_call_id", fmt::to_string(Common::ToUnderlying(draw_call_id)));
+          obj.emplace("projection type", fmt::to_string(data.draw_data.projection_type));
+          // TODO: blending, depth, rasterization...
+
+          picojson::array textures;
+          for (const auto& texture : data.draw_data.textures)
+          {
+            picojson::object texture_obj;
+            texture_obj.emplace("hash", texture.hash_name);
+            if (texture.texture_type == GraphicsModSystem::TextureType::Normal)
+            {
+              texture_obj.emplace("type", "Normal");
+            }
+            else if (texture.texture_type == GraphicsModSystem::TextureType::EFB)
+            {
+              texture_obj.emplace("type", "EFB");
+            }
+            else if (texture.texture_type == GraphicsModSystem::TextureType::XFB)
+            {
+              texture_obj.emplace("type", "XFB");
+            }
+
+            textures.push_back(picojson::value{texture_obj});
+          }
+          obj.emplace("textures", picojson::value{textures});
+          data_objects.push_back(picojson::value{obj});
+        }
+        const std::string path = File::GetUserPath(D_DUMP_IDX) + SConfig::GetInstance().GetGameID();
+        JsonToFile(PathToString(path + "_SceneMetadata.json"), picojson::value{data_objects}, true);
+      }
+      if (ImGui::MenuItem("Disable all actions", nullptr,
+                          &m_state->m_editor_data.m_disable_all_actions))
+      {
+      }
+      if (ImGui::MenuItem("View lighting", nullptr, &m_state->m_editor_data.m_view_lighting))
+      {
       }
       ImGui::EndMenu();
     }
@@ -459,6 +544,7 @@ bool EditorMain::NewMod(std::string_view name, std::string_view author,
   m_inspect_only = false;
 
   m_asset_browser_panel->ResetCurrentPath();
+  m_state->m_user_data.m_asset_library->Watch(PathToString(mod_path));
 
   auto& system = Core::System::GetInstance();
   system.GetGraphicsModManager().SetEditorBackend(std::make_unique<EditorBackend>(*m_state));
@@ -487,8 +573,8 @@ bool EditorMain::LoadMod(std::string_view name)
     return false;
   }
 
-  ReadFromGraphicsMod(&m_state->m_user_data, &m_state->m_editor_data, *config,
-                      PathToString(mod_path));
+  ReadFromGraphicsMod(&m_state->m_user_data, &m_state->m_editor_data, m_state->m_runtime_data,
+                      *config, PathToString(mod_path));
 
   auto& system = Core::System::GetInstance();
   auto& loader = system.GetCustomAssetLoader();
@@ -508,6 +594,7 @@ bool EditorMain::LoadMod(std::string_view name)
   m_inspect_only = false;
 
   m_asset_browser_panel->ResetCurrentPath();
+  m_state->m_user_data.m_asset_library->Watch(PathToString(mod_path));
 
   system.GetGraphicsModManager().SetEditorBackend(std::make_unique<EditorBackend>(*m_state));
 

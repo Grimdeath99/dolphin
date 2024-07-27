@@ -53,80 +53,83 @@ void ShaderControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& as
       std::visit(
           overloaded{
               [&](VideoCommon::ShaderProperty::Sampler2D& default_value) {
-                if (AssetDisplay(name, &m_state, &default_value.value, AssetDataType::Texture))
+                if (AssetDisplay(name, &m_state, &default_value.value.asset,
+                                 AssetDataType::Texture))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               },
               [&](VideoCommon::ShaderProperty::Sampler2DArray& default_value) {
-                if (AssetDisplay(name, &m_state, &default_value.value, AssetDataType::Texture))
+                if (AssetDisplay(name, &m_state, &default_value.value.asset,
+                                 AssetDataType::Texture))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               },
               [&](VideoCommon::ShaderProperty::SamplerCube& default_value) {
-                if (AssetDisplay(name, &m_state, &default_value.value, AssetDataType::Texture))
+                if (AssetDisplay(name, &m_state, &default_value.value.asset,
+                                 AssetDataType::Texture))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               },
               [&](s32& default_value) {
                 if (ImGui::InputInt(fmt::format("##{}", name).c_str(), &default_value))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               },
               [&](std::array<s32, 2>& default_value) {
                 if (ImGui::InputInt2(fmt::format("##{}", name).c_str(), default_value.data()))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               },
               [&](std::array<s32, 3>& default_value) {
                 if (ImGui::InputInt3(fmt::format("##{}", name).c_str(), default_value.data()))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               },
               [&](std::array<s32, 4>& default_value) {
                 if (ImGui::InputInt4(fmt::format("##{}", name).c_str(), default_value.data()))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               },
               [&](float& default_value) {
                 if (ImGui::InputFloat(fmt::format("##{}", name).c_str(), &default_value))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               },
               [&](std::array<float, 2>& default_value) {
                 if (ImGui::InputFloat2(fmt::format("##{}", name).c_str(), default_value.data()))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               },
               [&](std::array<float, 3>& default_value) {
                 if (ImGui::InputFloat3(fmt::format("##{}", name).c_str(), default_value.data()))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               },
               [&](std::array<float, 4>& default_value) {
                 if (ImGui::InputFloat4(fmt::format("##{}", name).c_str(), default_value.data()))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               },
               [&](VideoCommon::ShaderProperty::RGB& default_value) {
@@ -134,7 +137,7 @@ void ShaderControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& as
                                       default_value.value.data()))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               },
               [&](VideoCommon::ShaderProperty::RGBA& default_value) {
@@ -142,14 +145,14 @@ void ShaderControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& as
                                       default_value.value.data()))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               },
               [&](bool& default_value) {
                 if (ImGui::Checkbox(fmt::format("##{}", name).c_str(), &default_value))
                 {
                   *last_data_write = std::chrono::system_clock::now();
-                  GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                  GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                 }
               }},
           property.m_default);

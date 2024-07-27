@@ -35,9 +35,6 @@ private:
   Common::EventHook m_selection_event;
   std::set<SelectableType> m_selected_objects;
 
-  bool m_last_draw_gpu_skinned = false;
-  GraphicsModSystem::DrawCallID m_last_draw_call_id = GraphicsModSystem::DrawCallID::INVALID;
-  GraphicsModSystem::MaterialID m_last_material_id = GraphicsModSystem::MaterialID::INVALID;
   u64 m_xfb_counter = 0;
 };
 }  // namespace GraphicsModEditor

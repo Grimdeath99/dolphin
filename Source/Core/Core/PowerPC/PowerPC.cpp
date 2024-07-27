@@ -4,14 +4,12 @@
 #include "Core/PowerPC/PowerPC.h"
 
 #include <algorithm>
+#include <bit>
 #include <cstring>
-#include <istream>
-#include <ostream>
 #include <type_traits>
 #include <vector>
 
 #include "Common/Assert.h"
-#include "Common/BitUtils.h"
 #include "Common/ChunkFile.h"
 #include "Common/CommonTypes.h"
 #include "Common/FPURoundMode.h"
@@ -37,52 +35,28 @@ namespace PowerPC
 {
 double PairedSingle::PS0AsDouble() const
 {
-  return Common::BitCast<double>(ps0);
+  return std::bit_cast<double>(ps0);
 }
 
 double PairedSingle::PS1AsDouble() const
 {
-  return Common::BitCast<double>(ps1);
+  return std::bit_cast<double>(ps1);
 }
 
 void PairedSingle::SetPS0(double value)
 {
-  ps0 = Common::BitCast<u64>(value);
+  ps0 = std::bit_cast<u64>(value);
 }
 
 void PairedSingle::SetPS1(double value)
 {
-  ps1 = Common::BitCast<u64>(value);
+  ps1 = std::bit_cast<u64>(value);
 }
 
 static void InvalidateCacheThreadSafe(Core::System& system, u64 userdata, s64 cyclesLate)
 {
   system.GetPPCState().iCache.Invalidate(system.GetMemory(), system.GetJitInterface(),
                                          static_cast<u32>(userdata));
-}
-
-std::istream& operator>>(std::istream& is, CPUCore& core)
-{
-  std::underlying_type_t<CPUCore> val{};
-
-  if (is >> val)
-  {
-    core = static_cast<CPUCore>(val);
-  }
-  else
-  {
-    // Upon failure, fall back to the cached interpreter
-    // to ensure we always initialize our core reference.
-    core = CPUCore::CachedInterpreter;
-  }
-
-  return is;
-}
-
-std::ostream& operator<<(std::ostream& os, CPUCore core)
-{
-  os << static_cast<std::underlying_type_t<CPUCore>>(core);
-  return os;
 }
 
 PowerPCManager::PowerPCManager(Core::System& system)
@@ -296,9 +270,6 @@ void PowerPCManager::Init(CPUCore cpu_core)
   auto& memory = m_system.GetMemory();
   m_ppc_state.iCache.Init(memory);
   m_ppc_state.dCache.Init(memory);
-
-  if (Config::Get(Config::MAIN_ENABLE_DEBUGGING))
-    m_breakpoints.ClearAllTemporary();
 }
 
 void PowerPCManager::Reset()
@@ -655,19 +626,13 @@ void PowerPCManager::CheckExternalExceptions()
   m_system.GetJitInterface().UpdateMembase();
 }
 
-void PowerPCManager::CheckBreakPoints()
+bool PowerPCManager::CheckBreakPoints()
 {
   const TBreakPoint* bp = m_breakpoints.GetBreakpoint(m_ppc_state.pc);
 
   if (!bp || !bp->is_enabled || !EvaluateCondition(m_system, bp->condition))
-    return;
+    return false;
 
-  if (bp->break_on_hit)
-  {
-    m_system.GetCPU().Break();
-    if (GDBStub::IsActive())
-      GDBStub::TakeControl();
-  }
   if (bp->log_on_hit)
   {
     NOTICE_LOG_FMT(MEMMAP,
@@ -678,8 +643,21 @@ void PowerPCManager::CheckBreakPoints()
                    m_ppc_state.gpr[8], m_ppc_state.gpr[9], m_ppc_state.gpr[10], m_ppc_state.gpr[11],
                    m_ppc_state.gpr[12], LR(m_ppc_state));
   }
-  if (m_breakpoints.IsTempBreakPoint(m_ppc_state.pc))
-    m_breakpoints.Remove(m_ppc_state.pc);
+  if (bp->break_on_hit)
+    return true;
+  return false;
+}
+
+bool PowerPCManager::CheckAndHandleBreakPoints()
+{
+  if (CheckBreakPoints())
+  {
+    m_system.GetCPU().Break();
+    if (GDBStub::IsActive())
+      GDBStub::TakeControl();
+    return true;
+  }
+  return false;
 }
 
 void PowerPCState::SetSR(u32 index, u32 value)
@@ -748,8 +726,8 @@ void CheckExternalExceptionsFromJIT(PowerPCManager& power_pc)
   power_pc.CheckExternalExceptions();
 }
 
-void CheckBreakPointsFromJIT(PowerPCManager& power_pc)
+void CheckAndHandleBreakPointsFromJIT(PowerPCManager& power_pc)
 {
-  power_pc.CheckBreakPoints();
+  power_pc.CheckAndHandleBreakPoints();
 }
 }  // namespace PowerPC

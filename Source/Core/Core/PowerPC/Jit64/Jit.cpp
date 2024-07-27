@@ -16,6 +16,7 @@
 #endif
 
 #include "Common/CommonTypes.h"
+#include "Common/EnumUtils.h"
 #include "Common/GekkoDisassembler.h"
 #include "Common/IOFile.h"
 #include "Common/Logging/Log.h"
@@ -741,7 +742,7 @@ void Jit64::Jit(u32 em_address, bool clear_cache_and_retry_on_failure)
   {
     if (!SConfig::GetInstance().bJITNoBlockCache)
     {
-      WARN_LOG_FMT(POWERPC, "flushing trampoline code cache, please report if this happens a lot");
+      WARN_LOG_FMT(DYNA_REC, "flushing trampoline code cache, please report if this happens a lot");
     }
     ClearCache();
   }
@@ -830,15 +831,14 @@ void Jit64::Jit(u32 em_address, bool clear_cache_and_retry_on_failure)
   {
     // Code generation failed due to not enough free space in either the near or far code regions.
     // Clear the entire JIT cache and retry.
-    WARN_LOG_FMT(POWERPC, "flushing code caches, please report if this happens a lot");
+    WARN_LOG_FMT(DYNA_REC, "flushing code caches, please report if this happens a lot");
     ClearCache();
     Jit(em_address, false);
     return;
   }
 
-  PanicAlertFmtT(
-      "JIT failed to find code space after a cache clear. This should never happen. Please "
-      "report this incident on the bug tracker. Dolphin will now exit.");
+  PanicAlertFmtT("JIT failed to find code space after a cache clear. This should never happen. "
+                 "Please report this incident on the bug tracker. Dolphin will now exit.");
   std::exit(-1);
 }
 
@@ -849,7 +849,7 @@ bool Jit64::SetEmitterStateToFreeCodeRegion()
   const auto free_near = m_free_ranges_near.by_size_begin();
   if (free_near == m_free_ranges_near.by_size_end())
   {
-    WARN_LOG_FMT(POWERPC, "Failed to find free memory region in near code region.");
+    WARN_LOG_FMT(DYNA_REC, "Failed to find free memory region in near code region.");
     return false;
   }
   SetCodePtr(free_near.from(), free_near.to());
@@ -857,7 +857,7 @@ bool Jit64::SetEmitterStateToFreeCodeRegion()
   const auto free_far = m_free_ranges_far.by_size_begin();
   if (free_far == m_free_ranges_far.by_size_end())
   {
-    WARN_LOG_FMT(POWERPC, "Failed to find free memory region in far code region.");
+    WARN_LOG_FMT(DYNA_REC, "Failed to find free memory region in far code region.");
     return false;
   }
   m_far_code.SetCodePtr(free_far.from(), free_far.to());
@@ -952,15 +952,11 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
     js.compilerPC = op.address;
     js.op = &op;
     js.fpr_is_store_safe = op.fprIsStoreSafeBeforeInst;
-    js.instructionNumber = i;
     js.instructionsLeft = (code_block.m_num_instructions - 1) - i;
     const GekkoOPInfo* opinfo = op.opinfo;
     js.downcountAmount += opinfo->num_cycles;
     js.fastmemLoadStore = nullptr;
     js.fixupExceptionHandler = false;
-
-    if (!m_enable_debugging)
-      js.downcountAmount += PatchEngine::GetSpeedhackCycles(js.compilerPC);
 
     if (i == (code_block.m_num_instructions - 1))
     {
@@ -1037,6 +1033,30 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
     }
     else
     {
+      auto& cpu = m_system.GetCPU();
+      auto& power_pc = m_system.GetPowerPC();
+      if (m_enable_debugging && power_pc.GetBreakPoints().IsAddressBreakPoint(op.address) &&
+          !cpu.IsStepping())
+      {
+        gpr.Flush();
+        fpr.Flush();
+
+        MOV(32, PPCSTATE(pc), Imm32(op.address));
+        ABI_PushRegistersAndAdjustStack({}, 0);
+        ABI_CallFunctionP(PowerPC::CheckAndHandleBreakPointsFromJIT, &power_pc);
+        ABI_PopRegistersAndAdjustStack({}, 0);
+        MOV(64, R(RSCRATCH), ImmPtr(cpu.GetStatePtr()));
+        CMP(32, MatR(RSCRATCH), Imm32(Common::ToUnderlying(CPU::State::Running)));
+        FixupBranch noBreakpoint = J_CC(CC_E);
+
+        Cleanup();
+        MOV(32, PPCSTATE(npc), Imm32(op.address));
+        SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
+        JMP(asm_routines.dispatcher_exit, Jump::Near);
+
+        SetJumpTarget(noBreakpoint);
+      }
+
       if ((opinfo->flags & FL_USE_FPU) && !js.firstFPInstructionFound)
       {
         // This instruction uses FPU - needs to add FP exception bailout
@@ -1061,30 +1081,6 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
         SwitchToNearCode();
 
         js.firstFPInstructionFound = true;
-      }
-
-      auto& cpu = m_system.GetCPU();
-      auto& power_pc = m_system.GetPowerPC();
-      if (m_enable_debugging && power_pc.GetBreakPoints().IsAddressBreakPoint(op.address) &&
-          !cpu.IsStepping())
-      {
-        gpr.Flush();
-        fpr.Flush();
-
-        MOV(32, PPCSTATE(pc), Imm32(op.address));
-        ABI_PushRegistersAndAdjustStack({}, 0);
-        ABI_CallFunctionP(PowerPC::CheckBreakPointsFromJIT, &power_pc);
-        ABI_PopRegistersAndAdjustStack({}, 0);
-        MOV(64, R(RSCRATCH), ImmPtr(cpu.GetStatePtr()));
-        TEST(32, MatR(RSCRATCH), Imm32(0xFFFFFFFF));
-        FixupBranch noBreakpoint = J_CC(CC_Z);
-
-        Cleanup();
-        MOV(32, PPCSTATE(npc), Imm32(op.address));
-        SUB(32, PPCSTATE(downcount), Imm32(js.downcountAmount));
-        JMP(asm_routines.dispatcher_exit, Jump::Near);
-
-        SetJumpTarget(noBreakpoint);
       }
 
       if (bJITRegisterCacheOff)
@@ -1187,9 +1183,9 @@ bool Jit64::DoJit(u32 em_address, JitBlock* b, u32 nextPC)
   if (HasWriteFailed() || m_far_code.HasWriteFailed())
   {
     if (HasWriteFailed())
-      WARN_LOG_FMT(POWERPC, "JIT ran out of space in near code region during code generation.");
+      WARN_LOG_FMT(DYNA_REC, "JIT ran out of space in near code region during code generation.");
     if (m_far_code.HasWriteFailed())
-      WARN_LOG_FMT(POWERPC, "JIT ran out of space in far code region during code generation.");
+      WARN_LOG_FMT(DYNA_REC, "JIT ran out of space in far code region during code generation.");
 
     return false;
   }

@@ -14,11 +14,11 @@
 
 #include <picojson.h>
 
-#include "VideoCommon/Assets/CustomAssetLibrary.h"
 #include "VideoCommon/Assets/MaterialAsset.h"
 #include "VideoCommon/Assets/MeshAsset.h"
 #include "VideoCommon/Assets/ShaderAsset.h"
 #include "VideoCommon/Assets/TextureAsset.h"
+#include "VideoCommon/Assets/WatchableFilesystemAssetLibrary.h"
 #include "VideoCommon/GraphicsModEditor/EditorTypes.h"
 #include "VideoCommon/GraphicsModSystem/Config/GraphicsModAsset.h"
 
@@ -31,7 +31,7 @@ class CustomTextureData;
 
 namespace GraphicsModEditor
 {
-class EditorAssetSource final : public VideoCommon::CustomAssetLibrary
+class EditorAssetSource final : public VideoCommon::WatchableFilesystemAssetLibrary
 {
 public:
   // CustomAssetLibrary interface
@@ -44,6 +44,7 @@ public:
   // Editor interface
   EditorAsset* GetAssetFromPath(const std::filesystem::path& asset_path);
   const EditorAsset* GetAssetFromID(const AssetID& asset_id) const;
+  EditorAsset* GetAssetFromID(const AssetID& asset_id);
 
   void AddAsset(const std::filesystem::path& asset_path);
   void RemoveAsset(const std::filesystem::path& asset_path);
@@ -62,6 +63,11 @@ public:
   AbstractTexture* GetAssetPreview(const AssetID& asset_id);
 
 private:
+  void PathAdded(std::string_view path) override;
+  void PathModified(std::string_view path) override;
+  void PathRenamed(std::string_view old_path, std::string_view new_path) override;
+  void PathDeleted(std::string_view path) override;
+
   void AddAsset(const std::filesystem::path& asset_path, AssetID uuid);
   void SetAssetPreviewData(const AssetID& asset_id,
                            const VideoCommon::CustomTextureData& preview_data);

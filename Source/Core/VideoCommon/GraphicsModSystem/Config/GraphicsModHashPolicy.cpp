@@ -37,6 +37,7 @@ HashPolicy GetDefaultHashPolicy()
 {
   HashPolicy policy;
   policy.attributes = GetDefaultHashAttributes();
+  policy.first_texture_only = false;
   policy.version = 1;
   return policy;
 }
@@ -46,7 +47,7 @@ HashAttributes HashAttributesFromString(const std::string& str)
   if (str == "")
     return GetDefaultHashAttributes();
 
-  HashAttributes attributes = HashAttributes::NoAttributes;
+  HashAttributes attributes = static_cast<HashAttributes>(NoHashAttributes);
   auto parts = SplitString(str, ',');
   if (parts.empty())
     return GetDefaultHashAttributes();
@@ -79,7 +80,7 @@ HashAttributes HashAttributesFromString(const std::string& str)
       attributes = attributes | HashAttributes::Indices;
     }
   }
-  if (attributes == HashAttributes::NoAttributes)
+  if (static_cast<u16>(attributes) == NoHashAttributes)
     return GetDefaultHashAttributes();
   return attributes;
 }

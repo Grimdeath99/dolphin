@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "Common/HookableEvent.h"
+#include "VideoCommon/GraphicsModEditor/EditorFilter.h"
 #include "VideoCommon/GraphicsModEditor/EditorState.h"
 #include "VideoCommon/GraphicsModEditor/EditorTypes.h"
 #include "VideoCommon/GraphicsModSystem/Types.h"
@@ -26,6 +27,8 @@ private:
   void DrawCallPanel(const std::vector<GraphicsModEditor::RuntimeState::XFBData*>& xfbs);
   void EFBPanel(const std::vector<GraphicsModEditor::RuntimeState::XFBData*>& xfbs);
   void LightPanel(const std::vector<GraphicsModEditor::RuntimeState::XFBData*>& xfbs);
+
+  void HandleSelectionEvent(SelectableType selectable);
   Common::EventHook m_selection_event;
 
   EditorState& m_state;
@@ -47,5 +50,13 @@ private:
   bool m_freeze_scene_details = false;
   std::map<std::string, RuntimeState::XFBData, std::less<>> m_frozen_xfb_to_data;
   std::vector<std::string> m_frozen_xfbs_presented;
+
+  // Filter menu
+  bool m_filter_menu_toggled = false;
+  bool m_filter_menu_active = false;
+  float m_next_window_width = 0;
+  float m_next_window_height = 0;
+  bool m_draw_call_filter_active = false;
+  DrawCallFilterContext m_drawcall_filter_context;
 };
 }  // namespace GraphicsModEditor::Panels

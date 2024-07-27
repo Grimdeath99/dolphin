@@ -9,8 +9,10 @@
 
 #include <imgui.h>
 
+#include "Common/HookableEvent.h"
 #include "VideoCommon/Assets/CustomAssetLibrary.h"
 #include "VideoCommon/GraphicsModEditor/EditorState.h"
+#include "VideoCommon/GraphicsModEditor/MaterialGeneration.h"
 
 class AbstractTexture;
 
@@ -36,9 +38,16 @@ private:
   void BeginRename(const VideoCommon::CustomAssetLibrary::AssetID& asset_id,
                    std::string rename_text);
   void EndRename();
+  void BrowseEvent(const VideoCommon::CustomAssetLibrary::AssetID& asset_id);
+
+  Common::EventHook m_browse_event;
+
   EditorState& m_state;
 
   std::filesystem::path m_current_path;
+
+  // Filter
+  std::string m_filter_text;
 
   // Rename
   std::optional<VideoCommon::CustomAssetLibrary::AssetID> m_renamed_asset_id = std::nullopt;
@@ -50,5 +59,9 @@ private:
   bool m_is_mesh_import_active = false;
   bool m_mesh_import_import_materials = false;
   std::string m_mesh_import_filename;
+
+  // Generate materials
+  bool m_is_generate_material_active = false;
+  MaterialGenerationContext m_material_generation_context;
 };
 }  // namespace GraphicsModEditor::Panels

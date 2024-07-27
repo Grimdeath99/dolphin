@@ -15,6 +15,7 @@
 #include "Common/VariantUtil.h"
 #include "Core/System.h"
 #include "VideoCommon/Assets/CustomAssetLoader.h"
+#include "VideoCommon/GraphicsModEditor/Controls/MaterialGenerateWindow.h"
 #include "VideoCommon/GraphicsModEditor/Controls/MeshImportWindow.h"
 #include "VideoCommon/GraphicsModEditor/EditorEvents.h"
 #include "VideoCommon/Present.h"
@@ -41,6 +42,10 @@ namespace GraphicsModEditor::Panels
 AssetBrowserPanel::AssetBrowserPanel(EditorState& state) : m_state(state)
 {
   ResetCurrentPath();
+
+  m_browse_event = EditorEvents::JumpToAssetInBrowserEvent::Register(
+      [this](const VideoCommon::CustomAssetLibrary::AssetID& asset_id) { BrowseEvent(asset_id); },
+      "EditorAssetBrowserPanel");
 }
 
 void AssetBrowserPanel::ResetCurrentPath()
@@ -117,6 +122,18 @@ void AssetBrowserPanel::DrawImGui()
     }
   }
 
+  const float search_size = 200.0f;
+  const float search_padding = 50.0f;
+  if (ImGui::GetWindowSize().x > (search_size + search_padding))
+  {
+    const ImVec2 dummy_size =
+        ImVec2(ImGui::GetWindowSize().x - search_size - search_padding, ImGui::GetTextLineHeight());
+    ImGui::Dummy(dummy_size);
+    ImGui::SameLine();
+  }
+  ImGui::SetNextItemWidth(search_size);
+  ImGui::InputTextWithHint("##", "Search...", &m_filter_text);
+
   const u32 column_count =
       static_cast<u32>(ImGui::GetContentRegionAvail().x) / (thumbnail_size + padding);
   u32 columns_displayed = 0;
@@ -153,6 +170,8 @@ void AssetBrowserPanel::DrawImGui()
       if (std::filesystem::is_regular_file(entry))
       {
         const std::string filename = PathToString(entry.filename());
+        if (!m_filter_text.empty() && filename.find(m_filter_text) == std::string::npos)
+          continue;
         auto ext = entry.extension().string();
         Common::ToLower(&ext);
         if (ext == ".dds" || ext == ".png")
@@ -236,6 +255,14 @@ void AssetBrowserPanel::DrawImGui()
       }
     }
 
+    if (m_is_generate_material_active)
+    {
+      if (Controls::ShowMaterialGenerateWindow(&m_material_generation_context))
+      {
+        m_is_generate_material_active = false;
+      }
+    }
+
     if (ImGui::BeginPopupContextWindow("AssetBrowserGenericContextMenu",
                                        ImGuiPopupFlags_NoOpenOverItems |
                                            ImGuiPopupFlags_MouseButtonRight |
@@ -283,6 +310,15 @@ void AssetBrowserPanel::DrawImGui()
           }
         }
         ImGui::EndMenu();
+      }
+      if (ImGui::MenuItem("Generate Materials From Textures..."))
+      {
+        m_material_generation_context = {};
+        m_material_generation_context.state = &m_state;
+        m_is_generate_material_active = true;
+        m_material_generation_context.input_path = PathToString(m_current_path);
+        m_material_generation_context.output_path =
+            PathToString(m_state.m_user_data.m_current_mod_path / "materials");
       }
       ImGui::EndPopup();
     }
@@ -425,6 +461,7 @@ void AssetBrowserPanel::HandleAsset(const std::filesystem::path& asset_path,
       if (ImGui::MenuItem("Add to project"))
       {
         m_state.m_user_data.m_asset_library->AddAsset(asset_path);
+        GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
 
         asset = m_state.m_user_data.m_asset_library->GetAssetFromPath(asset_path);
         if (asset)
@@ -462,5 +499,15 @@ void AssetBrowserPanel::EndRename()
 {
   m_renamed_asset_id.reset();
   m_rename_text = "";
+}
+
+void AssetBrowserPanel::BrowseEvent(const VideoCommon::CustomAssetLibrary::AssetID& asset_id)
+{
+  EditorAsset* asset = m_state.m_user_data.m_asset_library->GetAssetFromID(asset_id);
+  if (asset)
+  {
+    m_current_path = asset->m_asset_path.parent_path();
+    EditorEvents::ItemsSelectedEvent::Trigger(std::set<SelectableType>{asset});
+  }
 }
 }  // namespace GraphicsModEditor::Panels

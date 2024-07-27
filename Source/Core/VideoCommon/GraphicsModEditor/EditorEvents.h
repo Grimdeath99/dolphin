@@ -6,6 +6,7 @@
 #include <set>
 
 #include "Common/HookableEvent.h"
+#include "VideoCommon/Assets/CustomAssetLibrary.h"
 #include "VideoCommon/GraphicsModEditor/EditorTypes.h"
 
 namespace GraphicsModEditor::EditorEvents
@@ -15,5 +16,15 @@ using ItemsSelectedEvent = Common::HookableEvent<"ItemsSelected", std::set<Selec
 
 // Event called when a change that can be saved occurs
 using ChangeOccurredEvent = Common::HookableEvent<"ChangeOccurred">;
+
+// Event called when an asset should reload, the event provides the asset id
+// for use in the loader
+// Will also trigger the above ChangeOccurred event
+using AssetReloadEvent =
+    Common::HookableEvent<"AssetReload", VideoCommon::CustomAssetLibrary::AssetID>;
+
+// Event called when requesting an asset in the asset browser
+using JumpToAssetInBrowserEvent =
+    Common::HookableEvent<"JumpToAssetInBrowser", VideoCommon::CustomAssetLibrary::AssetID>;
 
 }  // namespace GraphicsModEditor::EditorEvents

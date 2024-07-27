@@ -6,9 +6,12 @@
 #include <iostream>
 #include <variant>
 
+#include "Common/Logging/Log.h"
 #include "Common/VariantUtil.h"
 
+#include "VideoCommon/Assets/DirectFilesystemAssetLibrary.h"
 #include "VideoCommon/GraphicsModSystem/Config/GraphicsMod.h"
+#include "VideoCommon/GraphicsModSystem/Runtime/CustomTextureCache.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModAction.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModActionFactory.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModHash.h"
@@ -27,6 +30,7 @@ GraphicsModRuntimeBackend::GraphicsModRuntimeBackend(const Config::GraphicsModGr
     runtime_mod.m_hash_policy = config_mod.m_mod.m_default_hash_policy;
 
     auto filesystem_library = std::make_shared<VideoCommon::DirectFilesystemAssetLibrary>();
+    auto texture_cache = std::make_shared<VideoCommon::CustomTextureCache>();
 
     for (const auto& config_asset : config_mod.m_mod.m_assets)
     {
@@ -52,7 +56,7 @@ GraphicsModRuntimeBackend::GraphicsModRuntimeBackend(const Config::GraphicsModGr
     for (const auto& config_action : config_mod.m_mod.m_actions)
     {
       runtime_mod.m_actions.push_back(GraphicsModActionFactory::Create(
-          config_action.m_factory_name, config_action.m_data, filesystem_library));
+          config_action.m_factory_name, config_action.m_data, filesystem_library, texture_cache));
     }
 
     std::map<std::string, std::vector<GraphicsModAction*>> tag_to_actions;
@@ -152,8 +156,10 @@ void GraphicsModRuntimeBackend::OnDraw(const DrawDataView& draw_data,
   for (auto& mod : m_mods)
   {
     const auto hash_output = GetDrawDataHash(mod.m_hash_policy, draw_data);
+    const DrawCallID draw_call_id =
+        GetSkinnedDrawCallID(hash_output.draw_call_id, hash_output.material_id, draw_data);
 
-    if (const auto iter = mod.m_draw_id_to_actions.find(hash_output.draw_call_id);
+    if (const auto iter = mod.m_draw_id_to_actions.find(draw_call_id);
         iter != mod.m_draw_id_to_actions.end())
     {
       CustomDraw(draw_data, vertex_manager, iter->second);

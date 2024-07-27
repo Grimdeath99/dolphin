@@ -22,15 +22,23 @@
 #include "VideoCommon/NativeVertexFormat.h"
 #include "VideoCommon/ShaderGenCommon.h"
 
+namespace VideoCommon
+{
+class CustomTextureCache;
+}
+
 class CustomMeshAction final : public GraphicsModAction
 {
 public:
+  static constexpr std::string_view factory_name = "custom_mesh";
   static std::unique_ptr<CustomMeshAction>
-  Create(const picojson::value& json_data,
-         std::shared_ptr<VideoCommon::CustomAssetLibrary> library);
-  explicit CustomMeshAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library);
-  CustomMeshAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library, Common::Vec3 rotation,
-                   Common::Vec3 scale, Common::Vec3 translation,
+  Create(const picojson::value& json_data, std::shared_ptr<VideoCommon::CustomAssetLibrary> library,
+         std::shared_ptr<VideoCommon::CustomTextureCache> texture_cache);
+  explicit CustomMeshAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library,
+                            std::shared_ptr<VideoCommon::CustomTextureCache> texture_cache);
+  CustomMeshAction(std::shared_ptr<VideoCommon::CustomAssetLibrary> library,
+                   std::shared_ptr<VideoCommon::CustomTextureCache> texture_cache,
+                   Common::Vec3 rotation, Common::Vec3 scale, Common::Vec3 translation,
                    VideoCommon::CustomAssetLibrary::AssetID mesh_asset_id);
   ~CustomMeshAction();
   void OnDrawStarted(GraphicsModActionData::DrawStarted*) override;
@@ -41,6 +49,7 @@ public:
 
 private:
   std::shared_ptr<VideoCommon::CustomAssetLibrary> m_library;
+  std::shared_ptr<VideoCommon::CustomTextureCache> m_texture_cache;
   VideoCommon::CustomAssetLibrary::AssetID m_mesh_asset_id;
   VideoCommon::CachedAsset<VideoCommon::MeshAsset> m_cached_mesh_asset;
 
@@ -51,13 +60,15 @@ private:
   bool m_transform_changed = false;
   bool m_mesh_asset_changed = false;
   bool m_recalculate_original_mesh_center = true;
+  bool m_ignore_mesh_transform = false;
+  bool m_use_game_material = false;
 
   struct RenderChunk
   {
     CustomPipeline m_custom_pipeline;
     GraphicsModActionData::MeshChunk m_mesh_chunk;
     std::unique_ptr<NativeVertexFormat> m_native_vertex_format;
-    Common::SmallVector<u32, 8> m_tex_units;
+    Common::SmallVector<GraphicsModSystem::TextureView, 8> m_textures;
   };
   std::vector<RenderChunk> m_render_chunks;
   std::shared_ptr<VideoCommon::MeshData> m_mesh_data;

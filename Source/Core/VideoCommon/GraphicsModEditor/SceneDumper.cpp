@@ -11,6 +11,7 @@
 #include <tinygltf/tiny_gltf.h>
 
 #include "Common/EnumUtils.h"
+#include "Common/Logging/Log.h"
 
 #include "VideoCommon/AbstractTexture.h"
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModBackend.h"
@@ -93,9 +94,22 @@ struct SceneDumper::SceneDumperImpl
     m_model.asset.generator = "Dolphin emulator";
   }
 
-  std::map<std::string, tinygltf::Scene, std::less<>> m_xfb_hash_to_scene;
-  tinygltf::Scene m_current_scene;
+  using NodeList = std::vector<tinygltf::Node>;
+  std::map<std::string, NodeList, std::less<>> m_xfb_hash_to_scene;
+  NodeList m_current_node_list;
   tinygltf::Model m_model;
+
+  bool AreAllXFBsCapture(std::span<std::string> xfbs_presented)
+  {
+    if (m_xfb_hash_to_scene.empty())
+      return false;
+
+    return std::all_of(xfbs_presented.begin(), xfbs_presented.end(),
+                       [this](const std::string& xfb_presented) {
+                         return m_xfb_hash_to_scene.contains(xfb_presented);
+                       });
+  }
+
   void SaveScenesToFile(const std::string& path, std::span<std::string> xfbs_presented)
   {
     const bool embed_images = false;
@@ -107,13 +121,19 @@ struct SceneDumper::SceneDumperImpl
     {
       if (const auto it = m_xfb_hash_to_scene.find(xfb_presented); it != m_xfb_hash_to_scene.end())
       {
-        m_model.scenes.push_back(it->second);
+        for (auto&& node : it->second)
+        {
+          m_model.nodes.push_back(std::move(node));
+        }
       }
     }
 
     tinygltf::TinyGLTF gltf;
-    gltf.WriteGltfSceneToFile(&m_model, path, embed_images, embed_buffers, pretty_print,
-                              write_binary);
+    if (!gltf.WriteGltfSceneToFile(&m_model, path, embed_images, embed_buffers, pretty_print,
+                                   write_binary))
+    {
+      ERROR_LOG_FMT(VIDEO, "Failed to write GLTF file to '{}'", path);
+    }
   }
 };
 
@@ -128,7 +148,8 @@ SceneDumper::~SceneDumper() = default;
 
 bool SceneDumper::IsDrawCallInRecording(GraphicsModSystem::DrawCallID draw_call_id) const
 {
-  return m_record_request.m_draw_call_ids.contains(draw_call_id);
+  return m_record_request.m_draw_call_ids.empty() ||
+         m_record_request.m_draw_call_ids.contains(draw_call_id);
 }
 
 void SceneDumper::AddDataToRecording(GraphicsModSystem::DrawCallID draw_call_id,
@@ -304,10 +325,6 @@ void SceneDumper::AddDataToRecording(GraphicsModSystem::DrawCallID draw_call_id,
 
   // Fill out all vertex data
   const std::size_t stride = declaration.stride;
-
-  if (m_record_request.m_apply_gpu_skinning && declaration.posmtx.enable)
-  {
-  }
 
   Common::Vec3 origin_skinned;
   if (declaration.position.enable)
@@ -683,7 +700,8 @@ void SceneDumper::AddDataToRecording(GraphicsModSystem::DrawCallID draw_call_id,
 
   // Node data
   tinygltf::Node node;
-  node.name = fmt::format("Node {}", Common::ToUnderlying(draw_call_id));
+  node.name = fmt::format("Node {} for xfb {}", Common::ToUnderlying(draw_call_id),
+                          m_xfbs_since_recording_present);
   node.mesh = static_cast<int>(m_impl->m_model.meshes.size());
 
   // We expect to get data as a 3x3 if there's a global transform
@@ -708,8 +726,7 @@ void SceneDumper::AddDataToRecording(GraphicsModSystem::DrawCallID draw_call_id,
       }
     }
   }
-  m_impl->m_current_scene.nodes.push_back(static_cast<int>(m_impl->m_model.nodes.size()));
-  m_impl->m_model.nodes.push_back(std::move(node));
+  m_impl->m_current_node_list.push_back(std::move(node));
 
   // Mesh data
   tinygltf::Mesh mesh;
@@ -732,14 +749,39 @@ bool SceneDumper::IsRecording() const
 
 void SceneDumper::OnXFBCreated(const std::string& hash)
 {
-  m_impl->m_xfb_hash_to_scene.try_emplace(hash, std::move(m_impl->m_current_scene));
-  m_impl->m_current_scene = {};
+  if (m_recording_state != RecordingState::IS_RECORDING)
+  {
+    return;
+  }
+
+  m_xfbs_since_recording_present++;
+
+  // We saw a XFB create without any data and we just started capturing
+  // ignore it
+  if (m_impl->m_current_node_list.empty() && m_xfbs_since_recording_present == 1)
+  {
+    return;
+  }
+
+  // When our frame present happens, we might be in the middle of an xfb
+  // which means this initial create won't have all the data that we expect
+  // it to have.  Skip the first xfb and start collecting data after that
+  // This ensures our capture has all data it needs
+  if (m_xfbs_since_recording_present > 1)
+  {
+    m_impl->m_xfb_hash_to_scene.try_emplace(hash, std::move(m_impl->m_current_node_list));
+  }
+  m_impl->m_current_node_list = {};
 }
 
 void SceneDumper::OnFramePresented(std::span<std::string> xfbs_presented)
 {
   if (m_recording_state == RecordingState::IS_RECORDING)
   {
+    // If all our xfbs aren't captured in this frame, wait for next frame
+    if (!m_impl->AreAllXFBsCapture(xfbs_presented))
+      return;
+
     m_impl->SaveScenesToFile(m_scene_save_path, xfbs_presented);
     m_recording_state = RecordingState::NOT_RECORDING;
 
@@ -748,6 +790,7 @@ void SceneDumper::OnFramePresented(std::span<std::string> xfbs_presented)
     m_materialhash_to_material_id = {};
     m_texturehash_to_texture_id = {};
     m_impl = std::make_unique<SceneDumperImpl>();
+    m_xfbs_since_recording_present = 0;
   }
 
   if (m_recording_state == RecordingState::WANTS_RECORDING)

@@ -33,5 +33,14 @@ public:
 protected:
   void CustomDraw(const DrawDataView& draw_data, VertexManagerBase* vertex_manager,
                   std::span<GraphicsModAction*> actions);
+
+  // This will ensure gpu skinned draw calls are joined together
+  DrawCallID GetSkinnedDrawCallID(DrawCallID draw_call_id, MaterialID material_id,
+                                  const DrawDataView& draw_data);
+
+private:
+  bool m_last_draw_gpu_skinned = false;
+  GraphicsModSystem::DrawCallID m_last_draw_call_id = GraphicsModSystem::DrawCallID::INVALID;
+  GraphicsModSystem::MaterialID m_last_material_id = GraphicsModSystem::MaterialID::INVALID;
 };
 }  // namespace GraphicsModSystem::Runtime

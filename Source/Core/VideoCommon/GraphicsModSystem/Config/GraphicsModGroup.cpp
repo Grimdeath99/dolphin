@@ -178,23 +178,16 @@ void GraphicsModGroup::Load()
   const auto gameid_metadata = GetPath();
   if (File::Exists(gameid_metadata))
   {
-    std::string json_data;
-    if (!File::ReadFileToString(gameid_metadata, json_data))
-    {
-      ERROR_LOG_FMT(VIDEO, "Failed to load graphics mod group json file '{}'", gameid_metadata);
-      return;
-    }
-
     picojson::value root;
-    const auto error = picojson::parse(root, json_data);
-
-    if (!error.empty())
+    std::string error;
+    if (!JsonFromFile(gameid_metadata, &root, &error))
     {
       ERROR_LOG_FMT(VIDEO,
                     "Failed to load graphics mod group json file '{}' due to parse error: {}",
                     gameid_metadata, error);
       return;
     }
+
     if (!root.is<picojson::object>())
     {
       ERROR_LOG_FMT(
@@ -238,15 +231,6 @@ void GraphicsModGroup::Load()
 
 void GraphicsModGroup::Save() const
 {
-  const std::string file_path = GetPath();
-  std::ofstream json_stream;
-  File::OpenFStream(json_stream, file_path, std::ios_base::out);
-  if (!json_stream.is_open())
-  {
-    ERROR_LOG_FMT(VIDEO, "Failed to open graphics mod group json file '{}' for writing", file_path);
-    return;
-  }
-
   picojson::object serialized_root;
   picojson::array serialized_mods;
   for (const auto& [id, mod_ptr] : m_id_to_graphics_mod)
@@ -259,8 +243,11 @@ void GraphicsModGroup::Save() const
   }
   serialized_root.emplace("mods", std::move(serialized_mods));
 
-  const auto output = picojson::value{serialized_root}.serialize(true);
-  json_stream << output;
+  const auto file_path = GetPath();
+  if (!JsonToFile(file_path, picojson::value{serialized_root}, true))
+  {
+    ERROR_LOG_FMT(VIDEO, "Failed to open graphics mod group json file '{}' for writing", file_path);
+  }
 }
 
 void GraphicsModGroup::SetChangeCount(u32 change_count)

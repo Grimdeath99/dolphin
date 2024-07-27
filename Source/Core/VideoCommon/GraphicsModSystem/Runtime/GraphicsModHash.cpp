@@ -3,6 +3,8 @@
 
 #include "VideoCommon/GraphicsModSystem/Runtime/GraphicsModHash.h"
 
+#include <set>
+
 #include <xxh3.h>
 
 #include "Common/CommonTypes.h"
@@ -48,10 +50,27 @@ HashOutput GetDrawDataHash(const Config::HashPolicy& hash_policy, const DrawData
     XXH3_64bits_update(&draw_hash_state, &vertex_count, sizeof(u32));
   }
 
-  for (const auto& texture : draw_data.textures)
+  if (hash_policy.first_texture_only)
   {
-    XXH3_64bits_update(&draw_hash_state, texture.hash_name.data(), texture.hash_name.size());
-    XXH3_64bits_update(&material_hash_state, texture.hash_name.data(), texture.hash_name.size());
+    auto& first_texture = draw_data.textures[0];
+    XXH3_64bits_update(&draw_hash_state, first_texture.hash_name.data(),
+                       first_texture.hash_name.size());
+    XXH3_64bits_update(&material_hash_state, first_texture.hash_name.data(),
+                       first_texture.hash_name.size());
+  }
+  else
+  {
+    std::set<std::string_view> texture_hashes;
+    for (const auto& texture : draw_data.textures)
+    {
+      texture_hashes.insert(texture.hash_name);
+    }
+
+    for (const auto& texture_hash : texture_hashes)
+    {
+      XXH3_64bits_update(&draw_hash_state, texture_hash.data(), texture_hash.size());
+      XXH3_64bits_update(&material_hash_state, texture_hash.data(), texture_hash.size());
+    }
   }
 
   output.draw_call_id = static_cast<DrawCallID>(XXH3_64bits_digest(&draw_hash_state));

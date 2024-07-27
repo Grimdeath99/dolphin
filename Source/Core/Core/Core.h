@@ -134,16 +134,17 @@ void UndeclareAsHostThread();
 
 std::string StopMessage(bool main_thread, std::string_view message);
 
-bool IsRunning();
-bool IsRunningAndStarted();  // is running and the CPU loop has been entered
-bool IsCPUThread();          // this tells us whether we are the CPU thread.
+bool IsRunning(Core::System& system);
+bool IsRunningOrStarting(Core::System& system);
+bool IsCPUThread();  // this tells us whether we are the CPU thread.
 bool IsGPUThread();
 bool IsHostThread();
 
 bool WantsDeterminism();
 
 // [NOT THREADSAFE] For use by Host only
-void SetState(State state, bool report_state_change = true);
+void SetState(Core::System& system, State state, bool report_state_change = true,
+              bool initial_execution_state = false);
 State GetState(Core::System& system);
 
 void SaveScreenShot();

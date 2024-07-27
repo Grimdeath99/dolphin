@@ -130,6 +130,7 @@ void WriteToGraphicsMod(const UserData& user_data, GraphicsModSystem::Config::Gr
 }
 
 void ReadFromGraphicsMod(UserData* user_data, EditorData* editor_data,
+                         const RuntimeState& runtime_state,
                          const GraphicsModSystem::Config::GraphicsMod& config,
                          const std::string& mod_root)
 {
@@ -143,8 +144,8 @@ void ReadFromGraphicsMod(UserData* user_data, EditorData* editor_data,
   const auto create_action =
       [&](const std::string_view& action_name,
           const picojson::value& json_data) -> std::unique_ptr<GraphicsModAction> {
-    auto action =
-        GraphicsModActionFactory::Create(action_name, json_data, user_data->m_asset_library);
+    auto action = GraphicsModActionFactory::Create(
+        action_name, json_data, user_data->m_asset_library, runtime_state.m_texture_cache);
     if (action == nullptr)
     {
       return nullptr;

@@ -15,6 +15,7 @@
 #include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/Assets/TextureAsset.h"
 #include "VideoCommon/ConstantManager.h"
+#include "VideoCommon/GraphicsModSystem/Types.h"
 #include "VideoCommon/PixelShaderGen.h"
 
 namespace GraphicsModActionData
@@ -32,9 +33,7 @@ struct MeshChunk
 };
 struct DrawStarted
 {
-  const Common::SmallVector<u32, 8>& texture_units;
-  const NativeVertexFormat& current_vertex_format;
-  std::span<const u8> original_mesh_data;
+  const GraphicsModSystem::DrawDataView& draw_data_view;
   u32 current_components_available;
   bool* skip;
   std::optional<CustomPixelShader>* custom_pixel_shader;

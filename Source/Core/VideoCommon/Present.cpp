@@ -181,7 +181,8 @@ void Presenter::ViSwap(u32 xfb_addr, u32 fb_width, u32 fb_stride, u32 fb_height,
     // so just use its name directly
     if (m_xfb_entry->references.empty())
     {
-      present_info.xfb_copy_hashes.push_back(m_xfb_entry->texture_info_name);
+      if (!m_xfb_entry->texture_info_name.empty())
+        present_info.xfb_copy_hashes.push_back(m_xfb_entry->texture_info_name);
     }
     else
     {

@@ -81,6 +81,12 @@ void PropertiesPanel::DrawCallIDSelected(const GraphicsModSystem::DrawCallID& se
     ImGui::TableNextColumn();
 
     std::string friendly_name;
+    if (const auto user_iter =
+            m_state.m_user_data.m_draw_call_id_to_user_data.find(selected_object);
+        user_iter != m_state.m_user_data.m_draw_call_id_to_user_data.end())
+    {
+      friendly_name = user_iter->second.m_friendly_name;
+    }
     if (ImGui::InputText("##FrameTargetDisplayName", &friendly_name))
     {
       auto& user_data = m_state.m_user_data.m_draw_call_id_to_user_data[selected_object];
@@ -92,26 +98,25 @@ void PropertiesPanel::DrawCallIDSelected(const GraphicsModSystem::DrawCallID& se
     ImGui::TableNextColumn();
     ImGui::Text("ID");
     ImGui::TableNextColumn();
-    ImGui::TextWrapped("%s", fmt::to_string(Common::ToUnderlying(selected_object)).c_str());
+    ImGui::TextWrapped("%llu", Common::ToUnderlying(selected_object));
 
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     ImGui::Text("Time Created");
     ImGui::TableNextColumn();
-    ImGui::TextWrapped("%s",
-                       fmt::format("{}", data.m_create_time.time_since_epoch().count()).c_str());
+    ImGui::Text("%lld", static_cast<long long int>(data.m_create_time.time_since_epoch().count()));
 
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     ImGui::Text("Projection Type");
     ImGui::TableNextColumn();
-    ImGui::Text("%s", fmt::format("{}", data.draw_data.projection_type).c_str());
+    ImGui::Text("%s", fmt::to_string(data.draw_data.projection_type).c_str());
 
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     ImGui::Text("Cull Mode");
     ImGui::TableNextColumn();
-    ImGui::Text("%s", fmt::format("{}", data.draw_data.rasterization_state.cullmode).c_str());
+    ImGui::Text("%s", fmt::to_string(data.draw_data.rasterization_state.cullmode).c_str());
 
     ImGui::EndTable();
   }
@@ -176,6 +181,26 @@ void PropertiesPanel::DrawCallIDSelected(const GraphicsModSystem::DrawCallID& se
     }
   }
 
+  if (ImGui::CollapsingHeader("Geometry", ImGuiTreeNodeFlags_DefaultOpen))
+  {
+    if (ImGui::BeginTable("DrawGeometryForm", 2))
+    {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("Index Count");
+      ImGui::TableNextColumn();
+      ImGui::Text("%zu", data.draw_data.index_count);
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("Vertex Count");
+      ImGui::TableNextColumn();
+      ImGui::Text("%zu", data.draw_data.vertex_count);
+
+      ImGui::EndTable();
+    }
+  }
+
   if (ImGui::CollapsingHeader("Blending", ImGuiTreeNodeFlags_DefaultOpen))
   {
     if (ImGui::BeginTable("DrawBlendingForm", 2))
@@ -200,9 +225,45 @@ void PropertiesPanel::DrawCallIDSelected(const GraphicsModSystem::DrawCallID& se
 
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
+      ImGui::Text("Alpha update enabled?");
+      ImGui::TableNextColumn();
+      if (data.draw_data.blending_state.alphaupdate)
+        ImGui::Text("Yes");
+      else
+        ImGui::Text("No");
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
       ImGui::Text("Logicop update enabled?");
       ImGui::TableNextColumn();
       if (data.draw_data.blending_state.logicopenable)
+        ImGui::Text("Yes");
+      else
+        ImGui::Text("No");
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("Subtract set?");
+      ImGui::TableNextColumn();
+      if (data.draw_data.blending_state.subtract)
+        ImGui::Text("Yes");
+      else
+        ImGui::Text("No");
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("Subtract Alpha Set?");
+      ImGui::TableNextColumn();
+      if (data.draw_data.blending_state.subtractAlpha)
+        ImGui::Text("Yes");
+      else
+        ImGui::Text("No");
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("Use Dual Source?");
+      ImGui::TableNextColumn();
+      if (data.draw_data.blending_state.usedualsrc)
         ImGui::Text("Yes");
       else
         ImGui::Text("No");
@@ -215,9 +276,21 @@ void PropertiesPanel::DrawCallIDSelected(const GraphicsModSystem::DrawCallID& se
 
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
+      ImGui::Text("Destination alpha factor");
+      ImGui::TableNextColumn();
+      ImGui::Text("%s", fmt::to_string(data.draw_data.blending_state.dstfactoralpha).c_str());
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
       ImGui::Text("Source factor");
       ImGui::TableNextColumn();
       ImGui::Text("%s", fmt::to_string(data.draw_data.blending_state.srcfactor).c_str());
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("Source factor");
+      ImGui::TableNextColumn();
+      ImGui::Text("%s", fmt::to_string(data.draw_data.blending_state.srcfactoralpha).c_str());
 
       ImGui::EndTable();
     }
@@ -227,16 +300,77 @@ void PropertiesPanel::DrawCallIDSelected(const GraphicsModSystem::DrawCallID& se
   {
     if (ImGui::BeginTable("DrawTexturesForm", 2))
     {
-      for (const auto& texture : data.draw_data.textures)
+      std::map<std::string_view, std::size_t> hash_to_index;
+      for (std::size_t i = 0; i < data.draw_data.textures.size(); i++)
       {
+        auto& texture = data.draw_data.textures[i];
+        hash_to_index[texture.hash_name] = i;
+      }
+
+      for (const auto& [hash_name, index] : hash_to_index)
+      {
+        auto& texture = data.draw_data.textures[index];
         const auto& texture_info =
             m_state.m_runtime_data.m_texture_cache_id_to_data[texture.hash_name];
         const auto& texture_view = texture_info.texture;
         if (texture_view.texture_data)
         {
+          auto& sampler = data.draw_data.samplers[texture.unit];
+
           ImGui::TableNextRow();
           ImGui::TableNextColumn();
-          ImGui::Text("Texture (%i)", texture_view.unit);
+
+          ImGui::Text("Sampler (%i)", texture.unit);
+
+          ImGui::TableNextColumn();
+
+          ImGuiTableFlags flags = ImGuiTableFlags_Borders;
+          if (ImGui::BeginTable("WrapModeTable", 2, flags))
+          {
+            ImGui::TableSetupColumn("Direction");
+            ImGui::TableSetupColumn("Wrap Mode");
+            ImGui::TableHeadersRow();
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("u");
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", fmt::to_string(sampler.tm0.wrap_u).c_str());
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("v");
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", fmt::to_string(sampler.tm0.wrap_v).c_str());
+            ImGui::EndTable();
+          }
+
+          if (ImGui::BeginTable("FilterModeTable", 2, flags))
+          {
+            ImGui::TableSetupColumn("Type");
+            ImGui::TableSetupColumn("Filter Mode");
+            ImGui::TableHeadersRow();
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("min");
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", fmt::to_string(sampler.tm0.min_filter).c_str());
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("mag");
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", fmt::to_string(sampler.tm0.mag_filter).c_str());
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("mip");
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", fmt::to_string(sampler.tm0.mipmap_filter).c_str());
+            ImGui::EndTable();
+          }
+
+          ImGui::TableNextRow();
+          ImGui::TableNextColumn();
+          ImGui::Text("Texture (%i)", texture.unit);
           ImGui::TableNextColumn();
 
           const float column_width = ImGui::GetContentRegionAvail().x;
@@ -270,7 +404,11 @@ void PropertiesPanel::DrawCallIDSelected(const GraphicsModSystem::DrawCallID& se
           }
           else
           {
-            ImGui::Text("<Texture unloaded>");
+            ImGui::Text(
+                "<Texture %s unloaded, last created/updated: %lld/%lld>", texture.hash_name.data(),
+                static_cast<long long int>(texture_info.m_create_time.time_since_epoch().count()),
+                static_cast<long long int>(
+                    texture_info.m_last_load_time.time_since_epoch().count()));
           }
         }
       }
@@ -303,7 +441,7 @@ void PropertiesPanel::TextureCacheIDSelected(
     ImGui::TableNextColumn();
     ImGui::Text("Time Created");
     ImGui::TableNextColumn();
-    ImGui::Text("%s", fmt::format("{}", data.m_create_time.time_since_epoch().count()).c_str());
+    ImGui::Text("%lld", static_cast<long long int>(data.m_create_time.time_since_epoch().count()));
 
     if (data.texture.texture_data)
     {
@@ -343,13 +481,13 @@ void PropertiesPanel::LightSelected(const GraphicsModSystem::LightID& selected_o
     ImGui::TableNextColumn();
     ImGui::Text("ID");
     ImGui::TableNextColumn();
-    ImGui::Text("%s", fmt::to_string(Common::ToUnderlying(selected_object)).c_str());
+    ImGui::TextWrapped("%llu", Common::ToUnderlying(selected_object));
 
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     ImGui::Text("Time Created");
     ImGui::TableNextColumn();
-    ImGui::Text("%s", fmt::format("{}", data.m_create_time.time_since_epoch().count()).c_str());
+    ImGui::Text("%lld", static_cast<long long int>(data.m_create_time.time_since_epoch().count()));
 
     ImGui::TableNextRow();
     ImGui::TableNextColumn();

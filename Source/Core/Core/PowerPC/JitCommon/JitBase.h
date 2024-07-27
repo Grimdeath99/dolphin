@@ -91,9 +91,8 @@ protected:
   {
     u32 compilerPC;
     u32 blockStart;
-    int instructionNumber;
     int instructionsLeft;
-    int downcountAmount;
+    u32 downcountAmount;
     u32 numLoadStoreInst;
     u32 numFloatingPointInst;
     // If this is set, we need to generate an exception handler for the fastmem load.

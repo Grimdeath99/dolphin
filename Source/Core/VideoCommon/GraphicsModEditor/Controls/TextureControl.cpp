@@ -56,7 +56,7 @@ void TextureControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& a
         {
           texture_data->m_type = e;
           *last_data_write = std::chrono::system_clock::now();
-          GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+          GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
         }
       }
       ImGui::EndCombo();
@@ -64,9 +64,9 @@ void TextureControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& a
 
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
-    ImGui::Text("Filter Mode");
+    ImGui::Text("Min Filter Mode");
     ImGui::TableNextColumn();
-    if (ImGui::BeginCombo("##FilterMode",
+    if (ImGui::BeginCombo("##MinFilterMode",
                           fmt::to_string(texture_data->m_sampler.tm0.min_filter).c_str()))
     {
       for (auto e = FilterMode::Near; e <= FilterMode::Linear;
@@ -76,9 +76,8 @@ void TextureControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& a
         if (ImGui::Selectable(fmt::to_string(e).c_str(), is_selected))
         {
           texture_data->m_sampler.tm0.min_filter = e;
-          texture_data->m_sampler.tm0.mag_filter = e;
           *last_data_write = std::chrono::system_clock::now();
-          GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+          GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
         }
       }
       ImGui::EndCombo();
@@ -86,9 +85,52 @@ void TextureControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& a
 
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
-    ImGui::Text("Wrap Mode");
+    ImGui::Text("Mag Filter Mode");
     ImGui::TableNextColumn();
-    if (ImGui::BeginCombo("##WrapMode", fmt::to_string(texture_data->m_sampler.tm0.wrap_u).c_str()))
+    if (ImGui::BeginCombo("##MagFilterMode",
+                          fmt::to_string(texture_data->m_sampler.tm0.mag_filter).c_str()))
+    {
+      for (auto e = FilterMode::Near; e <= FilterMode::Linear;
+           e = static_cast<FilterMode>(static_cast<u32>(e) + 1))
+      {
+        const bool is_selected = texture_data->m_sampler.tm0.mag_filter == e;
+        if (ImGui::Selectable(fmt::to_string(e).c_str(), is_selected))
+        {
+          texture_data->m_sampler.tm0.mag_filter = e;
+          *last_data_write = std::chrono::system_clock::now();
+          GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
+        }
+      }
+      ImGui::EndCombo();
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("Mip Filter Mode");
+    ImGui::TableNextColumn();
+    if (ImGui::BeginCombo("##MipFilterMode",
+                          fmt::to_string(texture_data->m_sampler.tm0.mipmap_filter).c_str()))
+    {
+      for (auto e = FilterMode::Near; e <= FilterMode::Linear;
+           e = static_cast<FilterMode>(static_cast<u32>(e) + 1))
+      {
+        const bool is_selected = texture_data->m_sampler.tm0.mipmap_filter == e;
+        if (ImGui::Selectable(fmt::to_string(e).c_str(), is_selected))
+        {
+          texture_data->m_sampler.tm0.mipmap_filter = e;
+          *last_data_write = std::chrono::system_clock::now();
+          GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
+        }
+      }
+      ImGui::EndCombo();
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("U Wrap Mode");
+    ImGui::TableNextColumn();
+    if (ImGui::BeginCombo("##UWrapMode",
+                          fmt::to_string(texture_data->m_sampler.tm0.wrap_u).c_str()))
     {
       for (auto e = WrapMode::Clamp; e <= WrapMode::Mirror;
            e = static_cast<WrapMode>(static_cast<u32>(e) + 1))
@@ -97,9 +139,29 @@ void TextureControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& a
         if (ImGui::Selectable(fmt::to_string(e).c_str(), is_selected))
         {
           texture_data->m_sampler.tm0.wrap_u = e;
+          *last_data_write = std::chrono::system_clock::now();
+          GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
+        }
+      }
+      ImGui::EndCombo();
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("V Wrap Mode");
+    ImGui::TableNextColumn();
+    if (ImGui::BeginCombo("##VWrapMode",
+                          fmt::to_string(texture_data->m_sampler.tm0.wrap_v).c_str()))
+    {
+      for (auto e = WrapMode::Clamp; e <= WrapMode::Mirror;
+           e = static_cast<WrapMode>(static_cast<u32>(e) + 1))
+      {
+        const bool is_selected = texture_data->m_sampler.tm0.wrap_v == e;
+        if (ImGui::Selectable(fmt::to_string(e).c_str(), is_selected))
+        {
           texture_data->m_sampler.tm0.wrap_v = e;
           *last_data_write = std::chrono::system_clock::now();
-          GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+          GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
         }
       }
       ImGui::EndCombo();

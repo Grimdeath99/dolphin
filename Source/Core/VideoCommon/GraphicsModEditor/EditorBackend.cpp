@@ -15,19 +15,6 @@
 
 namespace GraphicsModEditor
 {
-namespace
-{
-bool IsDrawGPUSkinned(NativeVertexFormat* format, PrimitiveType primitive_type)
-{
-  if (primitive_type != PrimitiveType::Triangles && primitive_type != PrimitiveType::TriangleStrip)
-  {
-    return false;
-  }
-
-  const PortableVertexDeclaration vert_decl = format->GetVertexDeclaration();
-  return vert_decl.posmtx.enable;
-}
-}  // namespace
 EditorBackend::EditorBackend(EditorState& state) : m_state(state)
 {
   m_selection_event = EditorEvents::ItemsSelectedEvent::Register(
@@ -41,17 +28,8 @@ void EditorBackend::OnDraw(const GraphicsModSystem::DrawDataView& draw_data,
   const auto hash_output =
       GraphicsModSystem::Runtime::GetDrawDataHash(m_state.m_user_data.m_hash_policy, draw_data);
 
-  GraphicsModSystem::DrawCallID draw_call_id = hash_output.draw_call_id;
-  const bool is_draw_gpu_skinned =
-      IsDrawGPUSkinned(draw_data.vertex_format, draw_data.rasterization_state.primitive);
-  if (is_draw_gpu_skinned && m_last_draw_gpu_skinned &&
-      m_last_material_id == hash_output.material_id)
-  {
-    draw_call_id = m_last_draw_call_id;
-  }
-  m_last_draw_call_id = draw_call_id;
-  m_last_material_id = hash_output.material_id;
-  m_last_draw_gpu_skinned = is_draw_gpu_skinned;
+  const GraphicsModSystem::DrawCallID draw_call_id =
+      GetSkinnedDrawCallID(hash_output.draw_call_id, hash_output.material_id, draw_data);
 
   if (m_state.m_scene_dumper.IsRecording())
   {
@@ -74,35 +52,33 @@ void EditorBackend::OnDraw(const GraphicsModSystem::DrawDataView& draw_data,
     if (auto iter = m_state.m_runtime_data.m_draw_call_id_to_data.find(hash_output.draw_call_id);
         iter != m_state.m_runtime_data.m_draw_call_id_to_data.end())
     {
-      if (m_xfb_counter != iter->second.draw_data.xfb_counter)
+      if (m_xfb_counter > (iter->second.draw_data.xfb_counter + 1))
       {
-        iter->second.draw_data.blending_state = draw_data.blending_state;
-        iter->second.draw_data.depth_state = draw_data.depth_state;
-        iter->second.draw_data.projection_type = draw_data.projection_type;
-        iter->second.draw_data.rasterization_state = draw_data.rasterization_state;
-        iter->second.draw_data.xfb_counter = m_xfb_counter;
-
-        Common::SmallVector<GraphicsModSystem::Texture, 8> textures;
-        for (const auto& texture_view : draw_data.textures)
-        {
-          GraphicsModSystem::Texture texture;
-          texture.hash_name = std::string{texture_view.hash_name};
-          texture.texture_type = texture_view.texture_type;
-          textures.push_back(std::move(texture));
-        }
-        iter->second.draw_data.textures = textures;
-
-        const auto last_update_time = iter->second.m_last_update_time;
-        if (now - last_update_time > std::chrono::milliseconds{200})
-        {
-          // Reset our timestamp
-          iter->second.m_create_time = now;
-        }
-        RuntimeState::XFBData::DrawCallWithTime draw_call_with_time{hash_output.draw_call_id,
-                                                                    iter->second.m_create_time};
-        m_state.m_runtime_data.m_current_xfb.m_draw_call_ids.insert(draw_call_with_time);
-        iter->second.m_last_update_time = now;
+        iter->second.m_create_time = now;
       }
+      iter->second.draw_data.blending_state = draw_data.blending_state;
+      iter->second.draw_data.depth_state = draw_data.depth_state;
+      iter->second.draw_data.projection_type = draw_data.projection_type;
+      iter->second.draw_data.rasterization_state = draw_data.rasterization_state;
+      iter->second.draw_data.xfb_counter = m_xfb_counter;
+      iter->second.draw_data.vertex_count = draw_data.vertex_data.size();
+      iter->second.draw_data.index_count = draw_data.index_data.size();
+
+      Common::SmallVector<GraphicsModSystem::Texture, 8> textures;
+      for (const auto& texture_view : draw_data.textures)
+      {
+        GraphicsModSystem::Texture texture;
+        texture.hash_name = std::string{texture_view.hash_name};
+        texture.texture_type = texture_view.texture_type;
+        texture.unit = texture_view.unit;
+        textures.push_back(std::move(texture));
+      }
+      iter->second.draw_data.textures = textures;
+      iter->second.draw_data.samplers = draw_data.samplers;
+      RuntimeState::XFBData::DrawCallWithTime draw_call_with_time{hash_output.draw_call_id,
+                                                                  iter->second.m_create_time};
+      m_state.m_runtime_data.m_current_xfb.m_draw_call_ids.insert(draw_call_with_time);
+      iter->second.m_last_update_time = now;
     }
     else
     {
@@ -120,9 +96,11 @@ void EditorBackend::OnDraw(const GraphicsModSystem::DrawDataView& draw_data,
         GraphicsModSystem::Texture texture;
         texture.hash_name = std::string{texture_view.hash_name};
         texture.texture_type = texture_view.texture_type;
+        texture.unit = texture_view.unit;
         textures.push_back(std::move(texture));
       }
       data.draw_data.textures = textures;
+      data.draw_data.samplers = draw_data.samplers;
 
       data.m_create_time = now;
       data.m_last_update_time = now;
@@ -138,29 +116,55 @@ void EditorBackend::OnDraw(const GraphicsModSystem::DrawDataView& draw_data,
     std::array<GraphicsModAction*, 1> actions{m_state.m_editor_data.m_highlight_action.get()};
     CustomDraw(draw_data, vertex_manager, actions);
   }
+  else if (m_state.m_editor_data.m_view_lighting)
+  {
+    std::array<GraphicsModAction*, 1> actions{
+        m_state.m_editor_data.m_simple_light_visualization_action.get()};
+    CustomDraw(draw_data, vertex_manager, actions);
+  }
   else
   {
-    if (const auto iter = m_state.m_user_data.m_draw_call_id_to_actions.find(draw_call_id);
-        iter != m_state.m_user_data.m_draw_call_id_to_actions.end())
+    if (m_state.m_editor_data.m_disable_all_actions)
     {
-      CustomDraw(draw_data, vertex_manager, iter->second);
+      vertex_manager->DrawEmulatedMesh();
     }
     else
     {
-      CustomDraw(draw_data, vertex_manager, {});
+      if (const auto iter = m_state.m_user_data.m_draw_call_id_to_actions.find(draw_call_id);
+          iter != m_state.m_user_data.m_draw_call_id_to_actions.end())
+      {
+        CustomDraw(draw_data, vertex_manager, iter->second);
+      }
+      else
+      {
+        vertex_manager->DrawEmulatedMesh();
+      }
     }
   }
 }
 
 void EditorBackend::OnTextureLoad(const GraphicsModSystem::TextureView& texture)
 {
-  if (auto iter = m_state.m_runtime_data.m_texture_cache_id_to_data.find(texture.hash_name);
-      iter != m_state.m_runtime_data.m_texture_cache_id_to_data.end())
+  std::string texture_cache_id{texture.hash_name};
+  auto iter = m_state.m_runtime_data.m_texture_cache_id_to_data.lower_bound(texture.hash_name);
+  if (iter == m_state.m_runtime_data.m_texture_cache_id_to_data.end() ||
+      iter->first != texture.hash_name)
   {
-    iter->second.texture = texture;
-    iter->second.m_active = true;
-    iter->second.m_last_load_time = std::chrono::steady_clock::now();
+    m_state.m_runtime_data.m_current_xfb.m_texture_cache_ids.insert(texture_cache_id);
+
+    GraphicsModEditor::TextureCacheData data;
+    data.m_id = std::move(texture_cache_id);
+    data.m_create_time = std::chrono::steady_clock::now();
+    iter = m_state.m_runtime_data.m_texture_cache_id_to_data.emplace_hint(iter, texture.hash_name,
+                                                                          std::move(data));
   }
+  else
+  {
+    m_state.m_runtime_data.m_current_xfb.m_texture_cache_ids.insert(std::move(texture_cache_id));
+  }
+  iter->second.texture = texture;
+  iter->second.m_active = true;
+  iter->second.m_last_load_time = std::chrono::steady_clock::now();
 }
 
 void EditorBackend::OnTextureUnload(GraphicsModSystem::TextureType, std::string_view texture_hash)
@@ -192,8 +196,6 @@ void EditorBackend::OnTextureCreate(const GraphicsModSystem::TextureView& textur
   }
 
   std::string texture_cache_id{texture.hash_name};
-  m_state.m_runtime_data.m_current_xfb.m_texture_cache_ids.insert(texture_cache_id);
-
   GraphicsModEditor::TextureCacheData data;
   data.m_id = texture_cache_id;
   data.texture = texture;

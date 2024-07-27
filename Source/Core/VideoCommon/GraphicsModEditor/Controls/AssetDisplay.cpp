@@ -3,6 +3,8 @@
 
 #include "VideoCommon/GraphicsModEditor/Controls/AssetDisplay.h"
 
+#include "VideoCommon/GraphicsModEditor/EditorEvents.h"
+
 #include <string_view>
 
 #include <imgui.h>
@@ -71,6 +73,8 @@ bool AssetDisplay(std::string_view popup_name, EditorState* state,
   if (!asset_id) [[unlikely]]
     return false;
 
+  static std::string asset_filter_text = "";
+
   const std::string reset_popup_name = std::string{popup_name} + "Reset";
   bool changed = false;
   const EditorAsset* asset = nullptr;
@@ -84,6 +88,7 @@ bool AssetDisplay(std::string_view popup_name, EditorState* state,
     {
       if (!ImGui::IsPopupOpen(popup_name.data()))
       {
+        asset_filter_text = "";
         ImGui::OpenPopup(popup_name.data());
       }
     }
@@ -102,11 +107,16 @@ bool AssetDisplay(std::string_view popup_name, EditorState* state,
       {
         if (!ImGui::IsPopupOpen(popup_name.data()))
         {
+          asset_filter_text = "";
           ImGui::OpenPopup(popup_name.data());
         }
       }
       if (ImGui::BeginPopupContextItem(reset_popup_name.data()))
       {
+        if (ImGui::Selectable("View properties"))
+        {
+          EditorEvents::JumpToAssetInBrowserEvent::Trigger(asset->m_asset_id);
+        }
         if (ImGui::Selectable("Reset"))
         {
           *asset_id = "";
@@ -122,6 +132,7 @@ bool AssetDisplay(std::string_view popup_name, EditorState* state,
       {
         if (!ImGui::IsPopupOpen(popup_name.data()))
         {
+          asset_filter_text = "";
           ImGui::OpenPopup(popup_name.data());
         }
       }
@@ -143,12 +154,18 @@ bool AssetDisplay(std::string_view popup_name, EditorState* state,
 
   // Asset browser popup below
   const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-  ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+  const ImVec2 size = ImGui::GetMainViewport()->WorkSize;
+  ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowSize(ImVec2(size.x / 4.0f, size.y / 2.0f));
   if (ImGui::BeginPopup(popup_name.data()))
   {
     const u32 column_count = 5;
     u32 current_columns = 0;
     u32 assets_displayed = 0;
+
+    const float search_size = 200.0f;
+    ImGui::SetNextItemWidth(search_size);
+    ImGui::InputTextWithHint("##", "Search...", &asset_filter_text);
 
     if (ImGui::BeginTable("AssetBrowserPopupTable", column_count))
     {
@@ -157,6 +174,12 @@ bool AssetDisplay(std::string_view popup_name, EditorState* state,
       {
         if (asset_from_library->m_data_type != asset_type)
           continue;
+
+        const auto name = PathToString(asset_from_library->m_asset_path.stem());
+        if (!asset_filter_text.empty() && name.find(asset_filter_text) == std::string::npos)
+        {
+          continue;
+        }
 
         assets_displayed++;
         ImGui::TableNextColumn();
@@ -175,12 +198,11 @@ bool AssetDisplay(std::string_view popup_name, EditorState* state,
             changed = true;
             ImGui::CloseCurrentPopup();
           }
-          ImGui::TextWrapped("%s", PathToString(asset_from_library->m_asset_path.stem()).c_str());
+          ImGui::TextWrapped("%s", name.c_str());
         }
         else
         {
-          if (ImGui::Button(PathToString(asset_from_library->m_asset_path).c_str(),
-                            asset_button_size))
+          if (ImGui::Button(name.c_str(), asset_button_size))
           {
             *asset_id = asset_from_library->m_asset_id;
             changed = true;

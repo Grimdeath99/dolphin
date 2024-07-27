@@ -13,6 +13,7 @@
 #include "Common/VariantUtil.h"
 
 #include "VideoCommon/Assets/MaterialAsset.h"
+#include "VideoCommon/Assets/MaterialAssetUtils.h"
 #include "VideoCommon/Assets/ShaderAsset.h"
 #include "VideoCommon/GraphicsModEditor/Controls/AssetDisplay.h"
 #include "VideoCommon/GraphicsModEditor/EditorAssetSource.h"
@@ -20,105 +21,6 @@
 
 namespace GraphicsModEditor::Controls
 {
-namespace
-{
-void SetMaterialPropertiesFromShader(const VideoCommon::PixelShaderData& shader,
-                                     VideoCommon::MaterialData* material)
-{
-  material->properties.clear();
-  for (const auto& entry : shader.m_properties)
-  {
-    // C++20: error with capturing structured bindings for our version of clang
-    const auto& name = entry.first;
-    const auto& shader_property = entry.second;
-    std::visit(overloaded{[&](const VideoCommon::ShaderProperty::Sampler2D& default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value.value;
-                            material->properties.push_back(std::move(property));
-                          },
-                          [&](const VideoCommon::ShaderProperty::Sampler2DArray& default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value.value;
-                            material->properties.push_back(std::move(property));
-                          },
-                          [&](const VideoCommon::ShaderProperty::SamplerCube& default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value.value;
-                            material->properties.push_back(std::move(property));
-                          },
-                          [&](s32 default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value;
-                            material->properties.push_back(std::move(property));
-                          },
-                          [&](const std::array<s32, 2>& default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value;
-                            material->properties.push_back(std::move(property));
-                          },
-                          [&](const std::array<s32, 3>& default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value;
-                            material->properties.push_back(std::move(property));
-                          },
-                          [&](const std::array<s32, 4>& default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value;
-                            material->properties.push_back(std::move(property));
-                          },
-                          [&](float default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value;
-                            material->properties.push_back(std::move(property));
-                          },
-                          [&](const std::array<float, 2>& default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value;
-                            material->properties.push_back(std::move(property));
-                          },
-                          [&](const std::array<float, 3>& default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value;
-                            material->properties.push_back(std::move(property));
-                          },
-                          [&](const std::array<float, 4>& default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value;
-                            material->properties.push_back(std::move(property));
-                          },
-                          [&](const VideoCommon::ShaderProperty::RGB& default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value.value;
-                            material->properties.push_back(std::move(property));
-                          },
-                          [&](const VideoCommon::ShaderProperty::RGBA& default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value.value;
-                            material->properties.push_back(std::move(property));
-                          },
-                          [&](bool default_value) {
-                            VideoCommon::MaterialProperty property;
-                            property.m_code_name = name;
-                            property.m_value = default_value;
-                            material->properties.push_back(std::move(property));
-                          }},
-               shader_property.m_default);
-  }
-}
-}  // namespace
 MaterialControl::MaterialControl(EditorState& state) : m_state(state)
 {
 }
@@ -166,7 +68,7 @@ void MaterialControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& 
         }
         SetMaterialPropertiesFromShader(*shader->get(), material);
         *last_data_write = std::chrono::system_clock::now();
-        GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+        GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
         *valid = true;
       }
     }
@@ -200,13 +102,14 @@ void MaterialControl::DrawImGui(const VideoCommon::CustomAssetLibrary::AssetID& 
       }
       else
       {
-        DrawControl(shader_data, material, last_data_write);
+        DrawControl(asset_id, shader_data, material, last_data_write);
       }
     }
   }
 }
 
-void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
+void MaterialControl::DrawControl(const VideoCommon::CustomAssetLibrary::AssetID& asset_id,
+                                  VideoCommon::PixelShaderData* shader,
                                   VideoCommon::MaterialData* material,
                                   VideoCommon::CustomAssetLibrary::TimeType* last_data_write)
 {
@@ -230,12 +133,58 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
 
         std::visit(
             overloaded{
-                [&](VideoCommon::CustomAssetLibrary::AssetID& value) {
-                  if (AssetDisplay(material_property.m_code_name, &m_state, &value,
+                [&](VideoCommon::TextureSamplerValue& value) {
+                  if (AssetDisplay(material_property.m_code_name, &m_state, &value.asset,
                                    AssetDataType::Texture))
                   {
                     *last_data_write = std::chrono::system_clock::now();
-                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                    GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
+                  }
+
+                  const auto sampler_origin_str =
+                      VideoCommon::TextureSamplerValue::ToString(value.sampler_origin);
+                  if (ImGui::BeginCombo(
+                          fmt::format("##{}SamplerOrigin", material_property.m_code_name).c_str(),
+                          sampler_origin_str.c_str()))
+                  {
+                    static std::array<VideoCommon::TextureSamplerValue::SamplerOrigin, 2>
+                        all_sampler_types = {
+                            VideoCommon::TextureSamplerValue::SamplerOrigin::Asset,
+                            VideoCommon::TextureSamplerValue::SamplerOrigin::TextureHash};
+
+                    for (const auto& type : all_sampler_types)
+                    {
+                      const bool is_selected = type == value.sampler_origin;
+                      const auto type_name = VideoCommon::TextureSamplerValue::ToString(type);
+                      if (ImGui::Selectable(
+                              fmt::format("{}##{}", type_name, material_property.m_code_name)
+                                  .c_str(),
+                              is_selected))
+                      {
+                        value.sampler_origin = type;
+                        *last_data_write = std::chrono::system_clock::now();
+                        GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
+                      }
+                    }
+                    ImGui::EndCombo();
+                  }
+
+                  if (value.sampler_origin ==
+                      VideoCommon::TextureSamplerValue::SamplerOrigin::Asset)
+                  {
+                    ImGui::BeginDisabled();
+                  }
+                  if (ImGui::InputText(
+                          fmt::format("##{}TextureHash", material_property.m_code_name).c_str(),
+                          &value.texture_hash))
+                  {
+                    *last_data_write = std::chrono::system_clock::now();
+                    GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
+                  }
+                  if (value.sampler_origin ==
+                      VideoCommon::TextureSamplerValue::SamplerOrigin::Asset)
+                  {
+                    ImGui::EndDisabled();
                   }
                 },
                 [&](s32& value) {
@@ -243,7 +192,7 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
                                       &value))
                   {
                     *last_data_write = std::chrono::system_clock::now();
-                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                    GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                   }
                 },
                 [&](std::array<s32, 2>& value) {
@@ -251,7 +200,7 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
                                        value.data()))
                   {
                     *last_data_write = std::chrono::system_clock::now();
-                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                    GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                   }
                 },
                 [&](std::array<s32, 3>& value) {
@@ -259,7 +208,7 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
                                        value.data()))
                   {
                     *last_data_write = std::chrono::system_clock::now();
-                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                    GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                   }
                 },
                 [&](std::array<s32, 4>& value) {
@@ -267,7 +216,7 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
                                        value.data()))
                   {
                     *last_data_write = std::chrono::system_clock::now();
-                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                    GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                   }
                 },
                 [&](float& value) {
@@ -275,7 +224,7 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
                                         &value))
                   {
                     *last_data_write = std::chrono::system_clock::now();
-                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                    GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                   }
                 },
                 [&](std::array<float, 2>& value) {
@@ -283,7 +232,7 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
                                          value.data()))
                   {
                     *last_data_write = std::chrono::system_clock::now();
-                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                    GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                   }
                 },
                 [&](std::array<float, 3>& value) {
@@ -295,7 +244,7 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
                             value.data()))
                     {
                       *last_data_write = std::chrono::system_clock::now();
-                      GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                      GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                     }
                   }
                   else
@@ -305,7 +254,7 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
                             value.data()))
                     {
                       *last_data_write = std::chrono::system_clock::now();
-                      GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                      GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                     }
                   }
                 },
@@ -318,7 +267,7 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
                             value.data()))
                     {
                       *last_data_write = std::chrono::system_clock::now();
-                      GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                      GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                     }
                   }
                   else
@@ -328,7 +277,7 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
                             value.data()))
                     {
                       *last_data_write = std::chrono::system_clock::now();
-                      GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                      GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                     }
                   }
                 },
@@ -337,7 +286,7 @@ void MaterialControl::DrawControl(VideoCommon::PixelShaderData* shader,
                                       &value))
                   {
                     *last_data_write = std::chrono::system_clock::now();
-                    GraphicsModEditor::EditorEvents::ChangeOccurredEvent::Trigger();
+                    GraphicsModEditor::EditorEvents::AssetReloadEvent::Trigger(asset_id);
                   }
                 }},
             material_property.m_value);

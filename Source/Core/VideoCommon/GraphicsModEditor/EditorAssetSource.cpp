@@ -12,6 +12,7 @@
 
 #include "Common/FileUtil.h"
 #include "Common/IOFile.h"
+#include "Common/JsonUtil.h"
 #include "Common/StringUtil.h"
 #include "Common/VariantUtil.h"
 #include "Core/System.h"
@@ -46,16 +47,9 @@ std::chrono::system_clock::time_point FileTimeToSysTime(std::filesystem::file_ti
 
 std::optional<picojson::object> GetJsonObjectFromFile(const std::filesystem::path& path)
 {
-  std::string json_data;
-  if (!File::ReadFileToString(PathToString(path), json_data))
-  {
-    return std::nullopt;
-  }
-
   picojson::value root;
-  const auto error = picojson::parse(root, json_data);
-
-  if (!error.empty())
+  std::string error;
+  if (!JsonFromFile(PathToString(path), &root, &error))
   {
     ERROR_LOG_FMT(VIDEO, "Json file at path '{}' has error '{}'!", PathToString(path), error);
     return std::nullopt;
@@ -111,7 +105,7 @@ EditorAssetSource::LoadInfo EditorAssetSource::LoadTexture(const AssetID& asset_
       return {};
     }
 
-    SetAssetPreviewData(asset_id, data->m_texture);
+    // SetAssetPreviewData(asset_id, data->m_texture);
     return LoadInfo{GetAssetSize(data->m_texture), GetLastAssetWriteTime(asset_id)};
   }
   else if (ext == ".png")
@@ -140,7 +134,7 @@ EditorAssetSource::LoadInfo EditorAssetSource::LoadTexture(const AssetID& asset_
       return {};
     }
 
-    SetAssetPreviewData(asset_id, data->m_texture);
+    // SetAssetPreviewData(asset_id, data->m_texture);
     return LoadInfo{GetAssetSize(data->m_texture), GetLastAssetWriteTime(asset_id)};
   }
 
@@ -290,6 +284,21 @@ const EditorAsset* EditorAssetSource::GetAssetFromID(const AssetID& asset_id) co
   return &it->second;
 }
 
+EditorAsset* EditorAssetSource::GetAssetFromID(const AssetID& asset_id)
+{
+  std::lock_guard lk(m_asset_lock);
+
+  const auto asset_it = m_asset_id_to_file_path.find(asset_id);
+  if (asset_it == m_asset_id_to_file_path.end())
+    return nullptr;
+
+  const auto it = m_path_to_editor_asset.find(asset_it->second);
+  if (it == m_path_to_editor_asset.end())
+    return nullptr;
+
+  return &it->second;
+}
+
 void EditorAssetSource::AddAsset(const std::filesystem::path& asset_path)
 {
   std::string uuid_str =
@@ -310,28 +319,31 @@ void EditorAssetSource::AddAsset(const std::filesystem::path& asset_path, AssetI
   {
     auto texture_data = std::make_unique<VideoCommon::TextureData>();
 
-    // Metadata is optional
+    // Metadata is optional and will be created
+    // if it doesn't exist
     const auto root = asset_path.parent_path();
     const auto name = asset_path.stem();
     const auto extension = asset_path.extension();
     auto result = root / name;
-    result += ".metadata";
+    result += ".texture";
     if (std::filesystem::exists(result))
     {
       if (auto json = GetJsonObjectFromFile(result))
       {
-        std::string metadata;
-        if (File::ReadFileToString(PathToString(asset_path), metadata))
-        {
-          VideoCommon::TextureData::FromJson(uuid, *json, texture_data.get());
-        }
+        VideoCommon::TextureData::FromJson(uuid, *json, texture_data.get());
       }
-      asset.m_asset_map["metadata"] = result;
     }
     else
     {
       texture_data->m_type = VideoCommon::TextureData::Type::Type_Texture2D;
+
+      // Write initial data to a file, so that if any changes are made
+      // they get picked up and written on save
+      picojson::object obj;
+      VideoCommon::TextureData::ToJson(&obj, *texture_data);
+      JsonToFile(PathToString(result), picojson::value{obj}, true);
     }
+    asset.m_asset_map["metadata"] = result;
 
     add = true;
     asset.m_data = std::move(texture_data);
@@ -379,15 +391,11 @@ void EditorAssetSource::AddAsset(const std::filesystem::path& asset_path, AssetI
     {
       if (auto json = GetJsonObjectFromFile(result))
       {
-        std::string metadata;
-        if (File::ReadFileToString(PathToString(asset_path), metadata))
-        {
-          VideoCommon::MeshData::FromJson(uuid, *json, mesh_data.get());
-          add = true;
-          asset.m_data = std::move(mesh_data);
-          asset.m_data_type = Mesh;
-          asset.m_asset_map["mesh"] = asset_path;
-        }
+        VideoCommon::MeshData::FromJson(uuid, *json, mesh_data.get());
+        add = true;
+        asset.m_data = std::move(mesh_data);
+        asset.m_data_type = Mesh;
+        asset.m_asset_map["mesh"] = asset_path;
       }
       asset.m_asset_map["metadata"] = result;
     }
@@ -457,13 +465,13 @@ bool EditorAssetSource::RenameAsset(const std::filesystem::path& old_path,
     const auto old_root = old_path.parent_path();
     const auto old_name = old_path.stem();
     auto old_result = old_root / old_name;
-    old_result += ".metadata";
+    old_result += ".texture";
     if (std::filesystem::exists(old_result))
     {
       const auto new_root = new_path.parent_path();
       const auto new_name = new_path.stem();
       auto new_result = new_root / new_name;
-      new_result += ".metadata";
+      new_result += ".texture";
       std::filesystem::rename(old_result, new_result);
 
       extracted_entry.mapped().m_asset_map["metadata"] = new_result;
@@ -617,6 +625,34 @@ const std::vector<EditorAsset*>& EditorAssetSource::GetAllAssets() const
 {
   std::lock_guard lk(m_asset_lock);
   return m_assets;
+}
+
+void EditorAssetSource::PathAdded(std::string_view path)
+{
+  // TODO: notify our preview that there is a new preview
+}
+
+void EditorAssetSource::PathModified(std::string_view path)
+{
+  std::lock_guard lk(m_asset_lock);
+  if (const auto iter = m_path_to_editor_asset.find(path); iter != m_path_to_editor_asset.end())
+  {
+    auto& system = Core::System::GetInstance();
+    auto& loader = system.GetCustomAssetLoader();
+    loader.ReloadAsset(iter->second.m_asset_id);
+  }
+
+  // TODO: notify our preview that something changed
+}
+
+void EditorAssetSource::PathRenamed(std::string_view old_path, std::string_view new_path)
+{
+  // TODO: notify our preview that our path changed
+}
+
+void EditorAssetSource::PathDeleted(std::string_view path)
+{
+  // TODO: notify our preview that we no longer care about this path
 }
 
 AbstractTexture* EditorAssetSource::GetAssetPreview(const AssetID& asset_id)

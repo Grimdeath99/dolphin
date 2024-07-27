@@ -481,8 +481,10 @@ add_library(core
   PowerPC/BreakPoints.h
   PowerPC/CachedInterpreter/CachedInterpreter.cpp
   PowerPC/CachedInterpreter/CachedInterpreter.h
-  PowerPC/CachedInterpreter/InterpreterBlockCache.cpp
-  PowerPC/CachedInterpreter/InterpreterBlockCache.h
+  PowerPC/CachedInterpreter/CachedInterpreterBlockCache.cpp
+  PowerPC/CachedInterpreter/CachedInterpreterBlockCache.h
+  PowerPC/CachedInterpreter/CachedInterpreterEmitter.cpp
+  PowerPC/CachedInterpreter/CachedInterpreterEmitter.h
   PowerPC/ConditionRegister.cpp
   PowerPC/ConditionRegister.h
   PowerPC/Expression.cpp
@@ -751,6 +753,12 @@ if(CMAKE_SYSTEM_NAME MATCHES "Linux")
   endif()
 endif()
 
+if(CMAKE_SYSTEM_NAME MATCHES "OpenBSD")
+  # OpenBSD doesn't allow memory to be both writable and executable by default.
+  # The JIT currently needs this.
+  target_link_options(core PUBLIC -Wl,-zwxneeded)
+endif()
+
 if(TARGET Hidapi::Hidapi)
   target_sources(core PRIVATE
     HW/WiimoteReal/IOhidapi.cpp
@@ -773,7 +781,7 @@ if(MSVC)
 endif()
 
 if(USE_RETRO_ACHIEVEMENTS)
-  target_link_libraries(core PRIVATE rcheevos)
-  target_compile_definitions(core PRIVATE -DUSE_RETRO_ACHIEVEMENTS)
-  target_compile_definitions(core PRIVATE -DRC_CLIENT_SUPPORTS_HASH)
+  target_link_libraries(core PUBLIC rcheevos)
+  target_compile_definitions(core PUBLIC -DUSE_RETRO_ACHIEVEMENTS)
+  target_compile_definitions(core PUBLIC -DRC_CLIENT_SUPPORTS_HASH)
 endif()

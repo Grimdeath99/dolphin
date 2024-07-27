@@ -23,7 +23,8 @@ public:
                  VideoCommon::CustomAssetLibrary::TimeType* last_data_write, bool* valid);
 
 private:
-  void DrawControl(VideoCommon::PixelShaderData* shader, VideoCommon::MaterialData* material,
+  void DrawControl(const VideoCommon::CustomAssetLibrary::AssetID& asset_id,
+                   VideoCommon::PixelShaderData* shader, VideoCommon::MaterialData* material,
                    VideoCommon::CustomAssetLibrary::TimeType* last_data_write);
   EditorState& m_state;
 };

@@ -64,6 +64,7 @@ private:
 
   void OnChangeOccured();
   Common::EventHook m_change_occurred_event;
+  Common::EventHook m_asset_reload_event;
   bool m_has_changes = false;
   bool m_editor_session_in_progress = false;
   bool m_enabled = false;

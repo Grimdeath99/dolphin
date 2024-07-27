@@ -52,6 +52,7 @@ public:
     bool m_apply_gpu_skinning = true;
     bool m_include_transform = true;
     bool m_include_materials = true;
+    bool m_ignore_orthographic = false;
   };
   void Record(const std::string& path, const RecordingRequest& request);
   bool IsRecording() const;
@@ -75,7 +76,8 @@ private:
   std::map<std::string, int, std::less<>> m_texturehash_to_texture_id;
   RecordingRequest m_record_request;
   std::string m_scene_save_path;
-  bool m_saw_frame_end = false;
+
+  u8 m_xfbs_since_recording_present = 0;
 
   struct SceneDumperImpl;
   std::unique_ptr<SceneDumperImpl> m_impl;

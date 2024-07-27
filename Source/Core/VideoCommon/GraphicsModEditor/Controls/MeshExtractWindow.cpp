@@ -48,6 +48,11 @@ bool ShowMeshExtractWindow(SceneDumper& scene_dumper, SceneDumper::RecordingRequ
                           "defined by the game (some games may use a T pose or Rest pose), "
                           "otherwise applies the transformation as visible when captured");
 
+    ImGui::Checkbox("Ignore Orthographic Draws", &request.m_ignore_orthographic);
+    ImGui::SetItemTooltip(
+        "Ignore Orthographic Draws - ignores draws done using an orthographic projection. "
+        "This typically includes 2d elements like the HUD or EFB copies.");
+
     if (ImGui::Button("Extract", ImVec2(120, 0)))
     {
       const std::string path_prefix =

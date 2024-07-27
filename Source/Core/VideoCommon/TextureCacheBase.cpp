@@ -37,6 +37,7 @@
 #include "VideoCommon/AbstractFramebuffer.h"
 #include "VideoCommon/AbstractGfx.h"
 #include "VideoCommon/AbstractStagingTexture.h"
+#include "VideoCommon/Assets/CustomAssetLoader.h"
 #include "VideoCommon/Assets/CustomTextureData.h"
 #include "VideoCommon/BPMemory.h"
 #include "VideoCommon/FramebufferManager.h"
@@ -288,10 +289,13 @@ void TextureCacheBase::SetBackupConfig(const VideoConfig& config)
 
 bool TextureCacheBase::DidLinkedAssetsChange(const TCacheEntry& entry)
 {
+  auto& system = Core::System::GetInstance();
+  auto& loader = system.GetCustomAssetLoader();
   for (const auto& cached_asset : entry.linked_game_texture_assets)
   {
     if (cached_asset.m_asset)
     {
+      loader.AssetReferenced(cached_asset.m_asset->GetSessionId());
       if (cached_asset.m_asset->GetLastLoadedTime() > cached_asset.m_cached_write_time)
         return true;
     }
@@ -1028,8 +1032,8 @@ static bool IsAnisostropicEnhancementSafe(const TexMode0& tm0)
   return !(tm0.min_filter == FilterMode::Near && tm0.mag_filter == FilterMode::Near);
 }
 
-static void SetSamplerState(u32 index, float custom_tex_scale, bool custom_tex,
-                            bool has_arbitrary_mips)
+SamplerState TextureCacheBase::GetSamplerState(u32 index, float custom_tex_scale, bool custom_tex,
+                                               bool has_arbitrary_mips)
 {
   const TexMode0& tm0 = bpmem.tex.GetUnit(index).texMode0;
 
@@ -1089,13 +1093,11 @@ static void SetSamplerState(u32 index, float custom_tex_scale, bool custom_tex,
     state.tm0.anisotropic_filtering = false;
   }
 
-  g_gfx->SetSamplerState(index, state);
-  auto& system = Core::System::GetInstance();
-  auto& pixel_shader_manager = system.GetPixelShaderManager();
-  pixel_shader_manager.SetSamplerState(index, state.tm0.hex, state.tm1.hex);
+  return state;
 }
 
-void TextureCacheBase::BindTextures(BitSet32 used_textures)
+void TextureCacheBase::BindTextures(BitSet32 used_textures,
+                                    const std::array<SamplerState, 8>& samplers)
 {
   auto& system = Core::System::GetInstance();
   auto& pixel_shader_manager = system.GetPixelShaderManager();
@@ -1107,8 +1109,9 @@ void TextureCacheBase::BindTextures(BitSet32 used_textures)
       g_gfx->SetTexture(i, tentry->texture.get());
       pixel_shader_manager.SetTexDims(i, tentry->native_width, tentry->native_height);
 
-      const float custom_tex_scale = tentry->GetWidth() / float(tentry->native_width);
-      SetSamplerState(i, custom_tex_scale, tentry->is_custom_tex, tentry->has_arbitrary_mips);
+      auto& state = samplers[i];
+      g_gfx->SetSamplerState(i, state);
+      pixel_shader_manager.SetSamplerState(i, state.tm0.hex, state.tm1.hex);
     }
   }
 
@@ -1322,6 +1325,7 @@ TCacheEntry* TextureCacheBase::LoadImpl(const TextureInfo& texture_info, bool fo
     texture.hash_name = entry->texture_info_name;
     texture.texture_data = entry->texture.get();
     texture.texture_type = GraphicsModSystem::TextureType::Normal;
+    texture.unit = texture_info.GetStage();
     auto& system = Core::System::GetInstance();
     auto& mod_manager = system.GetGraphicsModManager();
     mod_manager.GetBackend().OnTextureLoad(texture);
@@ -1339,6 +1343,9 @@ TCacheEntry* TextureCacheBase::LoadImpl(const TextureInfo& texture_info, bool fo
 RcTcacheEntry TextureCacheBase::GetTexture(const int textureCacheSafetyColorSampleSize,
                                            const TextureInfo& texture_info)
 {
+  if (!texture_info.IsDataValid())
+    return {};
+
   // Hash assigned to texcache entry (also used to generate filenames used for texture dumping and
   // custom texture lookup)
   u64 base_hash = TEXHASH_INVALID;
@@ -1357,12 +1364,6 @@ RcTcacheEntry TextureCacheBase::GetTexture(const int textureCacheSafetyColorSamp
   // TODO: the texture cache lookup is based on address, but a texture from tmem has no reason
   //       to have a unique and valid address. This could result in a regular texture and a tmem
   //       texture aliasing onto the same texture cache entry.
-  if (!texture_info.GetData())
-  {
-    ERROR_LOG_FMT(VIDEO, "Trying to use an invalid texture address {:#010x}",
-                  texture_info.GetRawAddress());
-    return {};
-  }
 
   // If we are recording a FifoLog, keep track of what memory we read. FifoRecorder does
   // its own memory modification tracking independent of the texture hashing below.
@@ -1634,14 +1635,16 @@ RcTcacheEntry TextureCacheBase::GetTexture(const int textureCacheSafetyColorSamp
                          texture_info, textureCacheSafetyColorSampleSize,
                          std::move(data_for_assets), has_arbitrary_mipmaps, skip_texture_dump);
   entry->linked_game_texture_assets = std::move(cached_game_assets);
-  entry->texture_info_name = texture_info.CalculateTextureName().GetFullName();
 
   if (g_ActiveConfig.bGraphicMods)
   {
+    entry->texture_info_name = texture_info.CalculateTextureName().GetFullName();
+
     GraphicsModSystem::TextureView texture;
     texture.hash_name = entry->texture_info_name;
     texture.texture_data = entry->texture.get();
     texture.texture_type = GraphicsModSystem::TextureType::Normal;
+    texture.unit = texture_info.GetStage();
     auto& system = Core::System::GetInstance();
     auto& mod_manager = system.GetGraphicsModManager();
     mod_manager.GetBackend().OnTextureCreate(texture);
@@ -1913,7 +1916,7 @@ RcTcacheEntry TextureCacheBase::GetXFBTexture(u32 address, u32 width, u32 height
   entry->frameCount = FRAMECOUNT_INVALID;
   if (!g_ActiveConfig.UseGPUTextureDecoding() ||
       !DecodeTextureOnGPU(entry, 0, src_data, total_size, entry->format.texfmt, width, height,
-                          width, height, stride, texMem, entry->format.tlutfmt))
+                          width, height, stride, s_tex_mem.data(), entry->format.tlutfmt))
   {
     const u32 decoded_size = width * height * sizeof(u32);
     CheckTempSize(decoded_size);
@@ -2795,8 +2798,11 @@ TextureCacheBase::InvalidateTexture(TexAddrCache::iterator iter, bool discard_pe
     auto& mod_manager = system.GetGraphicsModManager();
     if (entry->is_efb_copy)
     {
-      mod_manager.GetBackend().OnTextureUnload(GraphicsModSystem::TextureType::EFB,
-                                               entry->texture_info_name);
+      if (entry->pending_efb_copy && discard_pending_efb_copy)
+      {
+        mod_manager.GetBackend().OnTextureUnload(GraphicsModSystem::TextureType::EFB,
+                                                 entry->texture_info_name);
+      }
     }
     else if (entry->is_xfb_copy)
     {

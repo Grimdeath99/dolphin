@@ -139,10 +139,13 @@ void VertexManagerBase::AddIndices(OpcodeDecoder::Primitive primitive, u32 num_v
 {
   m_index_generator.AddIndices(primitive, num_vertices);
 
-  // Tell any graphics mod backend we had more indices
-  auto& system = Core::System::GetInstance();
-  auto& mod_manager = system.GetGraphicsModManager();
-  mod_manager.GetBackend().AddIndices(primitive, num_vertices);
+  if (g_ActiveConfig.bGraphicMods)
+  {
+    // Tell any graphics mod backend we had more indices
+    auto& system = Core::System::GetInstance();
+    auto& mod_manager = system.GetGraphicsModManager();
+    mod_manager.GetBackend().AddIndices(primitive, num_vertices);
+  }
 }
 
 bool VertexManagerBase::AreAllVerticesCulled(VertexLoaderBase* loader,
@@ -161,10 +164,10 @@ DataReader VertexManagerBase::PrepareForAdditionalData(OpcodeDecoder::Primitive 
   // The SSE vertex loader can write up to 4 bytes past the end
   u32 const needed_vertex_bytes = count * stride + 4;
 
-  const bool supports_primitive_restart = g_ActiveConfig.backend_info.bSupportsPrimitiveRestart;
   // We can't merge different kinds of primitives, so we have to flush here
-  PrimitiveType new_primitive_type =
-      supports_primitive_restart ? primitive_from_gx_pr[primitive] : primitive_from_gx[primitive];
+  PrimitiveType new_primitive_type = g_ActiveConfig.backend_info.bSupportsPrimitiveRestart ?
+                                         primitive_from_gx_pr[primitive] :
+                                         primitive_from_gx[primitive];
   if (m_current_primitive_type != new_primitive_type) [[unlikely]]
   {
     Flush();
@@ -189,9 +192,12 @@ DataReader VertexManagerBase::PrepareForAdditionalData(OpcodeDecoder::Primitive 
   // need to alloc new buffer
   if (m_is_flushed) [[unlikely]]
   {
-    auto& system = Core::System::GetInstance();
-    auto& mod_manager = system.GetGraphicsModManager();
-    mod_manager.GetBackend().ResetIndices();
+    if (g_ActiveConfig.bGraphicMods)
+    {
+      auto& system = Core::System::GetInstance();
+      auto& mod_manager = system.GetGraphicsModManager();
+      mod_manager.GetBackend().ResetIndices();
+    }
 
     if (cullall)
     {
@@ -249,8 +255,6 @@ u32 VertexManagerBase::GetRemainingIndices(OpcodeDecoder::Primitive primitive) c
 {
   const u32 index_len = MAXIBUFFERSIZE - m_index_generator.GetIndexLen();
 
-  const bool supports_primitive_restart = g_ActiveConfig.backend_info.bSupportsPrimitiveRestart;
-
   if (primitive >= Primitive::GX_DRAW_LINES)
   {
     if (g_Config.UseVSForLinePointExpand())
@@ -299,7 +303,7 @@ u32 VertexManagerBase::GetRemainingIndices(OpcodeDecoder::Primitive primitive) c
       }
     }
   }
-  else if (supports_primitive_restart)
+  else if (g_Config.backend_info.bSupportsPrimitiveRestart)
   {
     switch (primitive)
     {
@@ -534,15 +538,21 @@ void VertexManagerBase::Flush()
     auto& counts =
         is_perspective ? m_flush_statistics.perspective : m_flush_statistics.orthographic;
 
+    const auto& projection = xfmem.projection.rawProjection;
     // TODO: Potentially the viewport size could be used as weight for the flush count average.
     // This way a small minimap would have less effect than a fullscreen projection.
+    const auto& viewport = xfmem.viewport;
 
-    if (IsAnamorphicProjection(xfmem.projection.rawProjection, xfmem.viewport, g_ActiveConfig))
+    // FYI: This average is based on flushes.
+    // It doesn't look at vertex counts like the heuristic does.
+    counts.average_ratio.Push(CalculateProjectionViewportRatio(projection, viewport));
+
+    if (IsAnamorphicProjection(projection, viewport, g_ActiveConfig))
     {
       ++counts.anamorphic_flush_count;
       counts.anamorphic_vertex_count += m_index_generator.GetIndexLen();
     }
-    else if (IsNormalProjection(xfmem.projection.rawProjection, xfmem.viewport, g_ActiveConfig))
+    else if (IsNormalProjection(projection, viewport, g_ActiveConfig))
     {
       ++counts.normal_flush_count;
       counts.normal_vertex_count += m_index_generator.GetIndexLen();
@@ -562,11 +572,17 @@ void VertexManagerBase::Flush()
 
   CalculateBinormals(VertexLoaderManager::GetCurrentVertexFormat());
   Common::SmallVector<GraphicsModSystem::TextureView, 8> textures;
+  std::array<SamplerState, 8> samplers;
   if (!m_cull_all)
   {
     for (const u32 i : used_textures)
     {
       const auto cache_entry = g_texture_cache->Load(TextureInfo::FromStage(i));
+      if (!cache_entry)
+        continue;
+      const float custom_tex_scale = cache_entry->GetWidth() / float(cache_entry->native_width);
+      samplers[i] = TextureCacheBase::GetSamplerState(
+          i, custom_tex_scale, cache_entry->is_custom_tex, cache_entry->has_arbitrary_mips);
 
       if (g_ActiveConfig.bGraphicMods)
       {
@@ -729,7 +745,7 @@ void VertexManagerBase::Flush()
     // Texture loading can cause palettes to be applied (-> uniforms -> draws).
     // Palette application does not use vertices, only a full-screen quad, so this is okay.
     // Same with GPU texture decoding, which uses compute shaders.
-    g_texture_cache->BindTextures(used_textures);
+    g_texture_cache->BindTextures(used_textures, samplers);
 
     if (PerfQueryBase::ShouldEmulate())
       g_perf_query->EnableQuery(bpmem.zcontrol.early_ztest ? PQG_ZCOMP_ZCOMPLOC : PQG_ZCOMP);
@@ -754,6 +770,7 @@ void VertexManagerBase::Flush()
       draw_data.depth_state = new_ds;
       draw_data.vertex_data = {m_last_reset_pointer, m_index_generator.GetNumVerts()};
       draw_data.textures = std::move(textures);
+      draw_data.samplers = std::move(samplers);
       draw_data.vertex_format = VertexLoaderManager::GetCurrentVertexFormat();
       draw_data.gpu_skinning_position_transform = vertex_shader_manager.constants.transformmatrices;
       draw_data.gpu_skinning_normal_transform = vertex_shader_manager.constants.normalmatrices;
@@ -768,10 +785,11 @@ void VertexManagerBase::Flush()
 
     INCSTAT(g_stats.this_frame.num_draw_calls);
 
+    // Even if we skip the draw, emulated state should still be impacted
+    OnDraw();
+
     if (PerfQueryBase::ShouldEmulate())
       g_perf_query->DisableQuery(bpmem.zcontrol.early_ztest ? PQG_ZCOMP_ZCOMPLOC : PQG_ZCOMP);
-
-    OnDraw();
 
     // The EFB cache is now potentially stale.
     g_framebuffer_manager->FlagPeekCacheAsOutOfDate();
@@ -1410,8 +1428,7 @@ void VertexManagerBase::DrawCustomMesh(
       // Now we can upload uniforms, as nothing else will override them.
       geometry_shader_manager.SetConstants(primitive_type);
       pixel_shader_manager.SetConstants();
-      if (!custom_pixel_shader_uniforms.empty() &&
-          pixel_shader_manager.custom_constants.data() != custom_pixel_shader_uniforms.data())
+      if (!custom_pixel_shader_uniforms.empty())
       {
         pixel_shader_manager.custom_constants_dirty = true;
       }

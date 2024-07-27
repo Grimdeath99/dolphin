@@ -8,6 +8,7 @@
 
 #include <fmt/format.h>
 #include <imgui.h>
+#include <misc/cpp/imgui_stdlib.h>
 
 #include "Common/EnumUtils.h"
 
@@ -39,20 +40,33 @@ ActiveTargetsPanel::ActiveTargetsPanel(EditorState& state) : m_state(state)
 
 void ActiveTargetsPanel::DrawImGui()
 {
+  const float filter_window_size_collapsed = 30;
+  const float filter_window_size_expanded = 415;
   // Set the active target panel first use size and position
   const ImGuiViewport* main_viewport = ImGui::GetMainViewport();
   u32 default_window_height = g_presenter->GetTargetRectangle().GetHeight() -
                               ((float)g_presenter->GetTargetRectangle().GetHeight() * 0.1);
-  u32 default_window_width = ((float)g_presenter->GetTargetRectangle().GetWidth() * 0.15);
+  u32 default_window_width =
+      ((float)g_presenter->GetTargetRectangle().GetWidth() * 0.15) + filter_window_size_collapsed;
   ImGui::SetNextWindowPos(ImVec2(main_viewport->WorkPos.x + default_window_width / 4,
                                  main_viewport->WorkPos.y +
                                      ((float)g_presenter->GetTargetRectangle().GetHeight() * 0.05)),
                           ImGuiCond_FirstUseEver);
-  ImGui::SetNextWindowSize(ImVec2(default_window_width, default_window_height),
-                           ImGuiCond_FirstUseEver);
+
+  if (m_filter_menu_toggled)
+  {
+    ImGui::SetNextWindowSize(ImVec2{m_next_window_width, m_next_window_height});
+    m_filter_menu_toggled = false;
+  }
+  else
+  {
+    ImGui::SetNextWindowSize(ImVec2(0, default_window_height), ImGuiCond_FirstUseEver);
+  }
 
   m_selection_list_changed = false;
-  ImGui::Begin("Scene Panel");
+  ImGui::Begin("Scene Panel", nullptr, ImGuiWindowFlags_NoResize);
+  const auto window_width = ImGui::GetWindowWidth();
+  const auto window_height = ImGui::GetWindowHeight();
 
   std::vector<GraphicsModEditor::RuntimeState::XFBData*> xfbs;
 
@@ -89,6 +103,7 @@ void ActiveTargetsPanel::DrawImGui()
     }
   }
 
+  ImGui::BeginChild("##SceneList", ImVec2{400, 0}, ImGuiChildFlags_None);
   ImGuiTabBarFlags tab_bar_flags = ImGuiTabBarFlags_None;
   if (ImGui::BeginTabBar("SceneTabs", tab_bar_flags))
   {
@@ -109,6 +124,113 @@ void ActiveTargetsPanel::DrawImGui()
     }
     ImGui::EndTabBar();
   }
+  ImGui::EndChild();
+  ImGui::SameLine();
+
+  if (m_filter_menu_active)
+  {
+    const ImVec2 size{filter_window_size_expanded, 0};
+    ImGui::BeginChild("##FilterMenu", size, ImGuiChildFlags_None);
+  }
+  else
+  {
+    const ImVec2 size{filter_window_size_collapsed, 0};
+    ImGui::BeginChild("##FilterMenu", size, ImGuiChildFlags_None);
+  }
+
+  if (m_filter_menu_active)
+  {
+    if (ImGui::Button("<<"))
+    {
+      m_filter_menu_toggled = true;
+      m_filter_menu_active = false;
+
+      m_next_window_width =
+          window_width - filter_window_size_expanded + filter_window_size_collapsed;
+      m_next_window_height = window_height;
+    }
+
+    if (ImGui::BeginTable("FilterTable", 2))
+    {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("Name");
+      ImGui::TableNextColumn();
+      ImGui::InputText("##FilterName", &m_drawcall_filter_context.text);
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("Texture Type");
+      ImGui::TableNextColumn();
+      ImGui::BeginGroup();
+
+      auto rb_texture = [&](std::string_view text,
+                            DrawCallFilterContext::TextureFilter texture_filter) {
+        if (ImGui::RadioButton(text.data(),
+                               m_drawcall_filter_context.texture_filter == texture_filter))
+        {
+          m_drawcall_filter_context.texture_filter = texture_filter;
+        }
+      };
+
+      rb_texture("Any##anytexture", DrawCallFilterContext::TextureFilter::Any);
+      rb_texture("Texture Only", DrawCallFilterContext::TextureFilter::TextureOnly);
+      rb_texture("EFB Only", DrawCallFilterContext::TextureFilter::EFBOnly);
+      rb_texture("EFB and Textures", DrawCallFilterContext::TextureFilter::Both);
+      rb_texture("None", DrawCallFilterContext::TextureFilter::None);
+      ImGui::EndGroup();
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("Projection Type");
+      ImGui::TableNextColumn();
+      ImGui::BeginGroup();
+
+      auto rb_projection = [&](std::string_view text,
+                               DrawCallFilterContext::ProjectionFilter projection_filter) {
+        if (ImGui::RadioButton(text.data(),
+                               m_drawcall_filter_context.projection_filter == projection_filter))
+        {
+          m_drawcall_filter_context.projection_filter = projection_filter;
+        }
+      };
+
+      rb_projection("Any##anyprojection", DrawCallFilterContext::ProjectionFilter::Any);
+      rb_projection("Orthographic", DrawCallFilterContext::ProjectionFilter::Orthographic);
+      rb_projection("Perspective", DrawCallFilterContext::ProjectionFilter::Perspective);
+      ImGui::EndGroup();
+
+      ImGui::EndTable();
+    }
+
+    if (m_draw_call_filter_active)
+    {
+      if (ImGui::Button("Cancel"))
+      {
+        m_draw_call_filter_active = false;
+      }
+    }
+    else
+    {
+      if (ImGui::Button("Filter"))
+      {
+        m_draw_call_filter_active = true;
+      }
+    }
+  }
+  else
+  {
+    if (ImGui::Button(">>"))
+    {
+      m_filter_menu_toggled = true;
+      m_filter_menu_active = true;
+
+      m_next_window_width =
+          window_width - filter_window_size_collapsed + filter_window_size_expanded;
+      m_next_window_height = window_height;
+    }
+  }
+  ImGui::EndChild();
 
   ImGui::End();
 
@@ -130,7 +252,6 @@ void ActiveTargetsPanel::DrawImGui()
 void ActiveTargetsPanel::DrawCallPanel(
     const std::vector<GraphicsModEditor::RuntimeState::XFBData*>& xfbs)
 {
-  auto& imgui_io = ImGui::GetIO();
   static constexpr ImGuiTreeNodeFlags base_flags = ImGuiTreeNodeFlags_OpenOnArrow |
                                                    ImGuiTreeNodeFlags_OpenOnDoubleClick |
                                                    ImGuiTreeNodeFlags_SpanAvailWidth;
@@ -143,6 +264,11 @@ void ActiveTargetsPanel::DrawCallPanel(
       const auto draw_call_id = draw_call_id_with_time.draw_call_id;
       if (draw_calls_seen.contains(draw_call_id))
         continue;
+      if (m_draw_call_filter_active &&
+          !DoesDrawCallMatchFilter(m_drawcall_filter_context, m_state, draw_call_id))
+      {
+        continue;
+      }
       draw_calls_seen.insert(draw_call_id);
       const auto target_actions_iter =
           m_state.m_user_data.m_draw_call_id_to_actions.find(draw_call_id);
@@ -173,13 +299,7 @@ void ActiveTargetsPanel::DrawCallPanel(
       const bool node_open = ImGui::TreeNodeEx(id.c_str(), node_flags, "%s", name.data());
 
       bool ignore_target_context_menu = false;
-      if (ImGui::IsItemClicked(ImGuiMouseButton_::ImGuiMouseButton_Left) || ImGui::IsItemFocused())
-      {
-        if (!imgui_io.KeyCtrl)
-          m_selected_nodes.clear();
-        m_selected_nodes.insert(draw_call_id);
-        m_selection_list_changed = true;
-      }
+      HandleSelectionEvent(draw_call_id);
 
       // Normally we would use 'BeginPopupContextItem' but unfortunately we can't logically do this
       // after handling the node state because it gets the _last_ item clicked
@@ -205,14 +325,7 @@ void ActiveTargetsPanel::DrawCallPanel(
             const std::string action_name =
                 fmt::format("{}-{}", action->GetFactoryName(), action->GetID());
             ImGui::TreeNodeEx(action_name.c_str(), node_flags, "%s", action_name.c_str());
-            if (ImGui::IsItemClicked(ImGuiMouseButton_::ImGuiMouseButton_Left) ||
-                ImGui::IsItemFocused())
-            {
-              if (!imgui_io.KeyCtrl)
-                m_selected_nodes.clear();
-              m_selected_nodes.insert(action);
-              m_selection_list_changed = true;
-            }
+            HandleSelectionEvent(action);
 
             if (ImGui::BeginPopupContextItem())
             {
@@ -241,8 +354,10 @@ void ActiveTargetsPanel::DrawCallPanel(
               return action.get() == action_to_delete;
             });
 
-            m_selected_nodes.erase(action_to_delete);
-            m_selection_list_changed = true;
+            if (m_selected_nodes.erase(action_to_delete) > 0)
+            {
+              m_selection_list_changed = true;
+            }
           }
         }
         ImGui::TreePop();
@@ -289,8 +404,8 @@ void ActiveTargetsPanel::DrawCallPanel(
 
             if (ImGui::MenuItem("Custom Mesh"))
             {
-              auto action = std::make_unique<EditorAction>(
-                  std::make_unique<CustomMeshAction>(m_state.m_user_data.m_asset_library));
+              auto action = std::make_unique<EditorAction>(std::make_unique<CustomMeshAction>(
+                  m_state.m_user_data.m_asset_library, m_state.m_runtime_data.m_texture_cache));
               action->SetID(m_state.m_editor_data.m_next_action_id);
 
               auto& action_refs = m_state.m_user_data.m_draw_call_id_to_actions[draw_call_id];
@@ -303,8 +418,8 @@ void ActiveTargetsPanel::DrawCallPanel(
 
             if (ImGui::MenuItem("Custom Pipeline"))
             {
-              auto action = std::make_unique<EditorAction>(
-                  CustomPipelineAction::Create(m_state.m_user_data.m_asset_library));
+              auto action = std::make_unique<EditorAction>(CustomPipelineAction::Create(
+                  m_state.m_user_data.m_asset_library, m_state.m_runtime_data.m_texture_cache));
               action->SetID(m_state.m_editor_data.m_next_action_id);
 
               auto& action_refs = m_state.m_user_data.m_draw_call_id_to_actions[draw_call_id];
@@ -339,7 +454,6 @@ void ActiveTargetsPanel::DrawCallPanel(
 void ActiveTargetsPanel::EFBPanel(
     const std::vector<GraphicsModEditor::RuntimeState::XFBData*>& xfbs)
 {
-  auto& imgui_io = ImGui::GetIO();
   static constexpr ImGuiTreeNodeFlags base_flags = ImGuiTreeNodeFlags_OpenOnArrow |
                                                    ImGuiTreeNodeFlags_OpenOnDoubleClick |
                                                    ImGuiTreeNodeFlags_SpanAvailWidth;
@@ -352,7 +466,9 @@ void ActiveTargetsPanel::EFBPanel(
           m_state.m_runtime_data.m_texture_cache_id_to_data[texture_cache_id];
 
       // TODO: don't skip, just present differently...
-      if (runtime_data.texture.texture_type != GraphicsModSystem::TextureType::EFB)
+      // if (runtime_data.texture.texture_type != GraphicsModSystem::TextureType::EFB)
+      //  continue;
+      if (!runtime_data.m_active)
         continue;
 
       const auto target_actions_iter =
@@ -384,13 +500,7 @@ void ActiveTargetsPanel::EFBPanel(
           ImGui::TreeNodeEx(texture_cache_id.c_str(), node_flags, "%s", name.data());
 
       bool ignore_target_context_menu = false;
-      if (ImGui::IsItemClicked(ImGuiMouseButton_::ImGuiMouseButton_Left) || ImGui::IsItemFocused())
-      {
-        if (!imgui_io.KeyCtrl)
-          m_selected_nodes.clear();
-        m_selected_nodes.insert(texture_cache_id);
-        m_selection_list_changed = true;
-      }
+      HandleSelectionEvent(texture_cache_id);
       if (!node_open)
       {
         m_open_texture_call_nodes.erase(texture_cache_id);
@@ -411,14 +521,7 @@ void ActiveTargetsPanel::EFBPanel(
             const std::string action_name =
                 fmt::format("{}-{}", action->GetFactoryName(), action->GetID());
             ImGui::TreeNodeEx(action_name.c_str(), node_flags, "%s", action_name.c_str());
-            if (ImGui::IsItemClicked(ImGuiMouseButton_::ImGuiMouseButton_Left) ||
-                ImGui::IsItemFocused())
-            {
-              if (!imgui_io.KeyCtrl)
-                m_selected_nodes.clear();
-              m_selected_nodes.insert(action);
-              m_selection_list_changed = true;
-            }
+            HandleSelectionEvent(action);
 
             if (ImGui::BeginPopupContextItem())
             {
@@ -447,8 +550,10 @@ void ActiveTargetsPanel::EFBPanel(
               return action.get() == action_to_delete;
             });
 
-            m_selected_nodes.erase(action_to_delete);
-            m_selection_list_changed = true;
+            if (m_selected_nodes.erase(action_to_delete) > 0)
+            {
+              m_selection_list_changed = true;
+            }
           }
         }
         ImGui::TreePop();
@@ -482,7 +587,6 @@ void ActiveTargetsPanel::EFBPanel(
 void ActiveTargetsPanel::LightPanel(
     const std::vector<GraphicsModEditor::RuntimeState::XFBData*>& xfbs)
 {
-  auto& imgui_io = ImGui::GetIO();
   static constexpr ImGuiTreeNodeFlags base_flags = ImGuiTreeNodeFlags_OpenOnArrow |
                                                    ImGuiTreeNodeFlags_OpenOnDoubleClick |
                                                    ImGuiTreeNodeFlags_SpanAvailWidth;
@@ -519,13 +623,7 @@ void ActiveTargetsPanel::LightPanel(
       const bool node_open = ImGui::TreeNodeEx(id.c_str(), node_flags, "%s", name.data());
 
       bool ignore_target_context_menu = false;
-      if (ImGui::IsItemClicked(ImGuiMouseButton_::ImGuiMouseButton_Left) || ImGui::IsItemFocused())
-      {
-        if (!imgui_io.KeyCtrl)
-          m_selected_nodes.clear();
-        m_selected_nodes.insert(light_id);
-        m_selection_list_changed = true;
-      }
+      HandleSelectionEvent(light_id);
       if (!node_open)
       {
         m_open_light_nodes.erase(light_id);
@@ -544,14 +642,7 @@ void ActiveTargetsPanel::LightPanel(
           const std::string action_name =
               fmt::format("{}-{}", action->GetFactoryName(), action->GetID());
           ImGui::TreeNodeEx(action_name.c_str(), node_flags, "%s", action_name.c_str());
-          if (ImGui::IsItemClicked(ImGuiMouseButton_::ImGuiMouseButton_Left) ||
-              ImGui::IsItemFocused())
-          {
-            if (!imgui_io.KeyCtrl)
-              m_selected_nodes.clear();
-            m_selected_nodes.insert(action);
-            m_selection_list_changed = true;
-          }
+          HandleSelectionEvent(action);
 
           if (ImGui::BeginPopupContextItem())
           {
@@ -580,8 +671,10 @@ void ActiveTargetsPanel::LightPanel(
             return action.get() == action_to_delete;
           });
 
-          m_selected_nodes.erase(action_to_delete);
-          m_selection_list_changed = true;
+          if (m_selected_nodes.erase(action_to_delete) > 0)
+          {
+            m_selection_list_changed = true;
+          }
         }
         ImGui::TreePop();
       }
@@ -626,6 +719,24 @@ void ActiveTargetsPanel::LightPanel(
         }
         ImGui::OpenPopupOnItemClick(id.c_str(), ImGuiPopupFlags_MouseButtonRight);
       }
+    }
+  }
+}
+
+void ActiveTargetsPanel::HandleSelectionEvent(SelectableType selectable)
+{
+  const bool item_clicked = ImGui::IsItemClicked(ImGuiMouseButton_::ImGuiMouseButton_Left);
+  const bool key_transition = (ImGui::IsWindowFocused() && ImGui::IsItemFocused() &&
+                               (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_DownArrow) ||
+                                ImGui::IsKeyDown(ImGuiKey::ImGuiKey_UpArrow)));
+  if (item_clicked || key_transition)
+  {
+    if (!ImGui::GetIO().KeyCtrl)
+      m_selected_nodes.clear();
+    const auto [it, inserted] = m_selected_nodes.insert(selectable);
+    if (inserted)
+    {
+      m_selection_list_changed = true;
     }
   }
 }

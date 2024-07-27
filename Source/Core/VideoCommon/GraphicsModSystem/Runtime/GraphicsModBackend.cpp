@@ -138,6 +138,16 @@ GetUberPipelineState(const GraphicsModActionData::MeshChunk& mesh_chunk)
 
   return result;
 }
+bool IsDrawGPUSkinned(NativeVertexFormat* format, PrimitiveType primitive_type)
+{
+  if (primitive_type != PrimitiveType::Triangles && primitive_type != PrimitiveType::TriangleStrip)
+  {
+    return false;
+  }
+
+  const PortableVertexDeclaration vert_decl = format->GetVertexDeclaration();
+  return vert_decl.posmtx.enable;
+}
 }  // namespace
 void GraphicsModBackend::CustomDraw(const DrawDataView& draw_data,
                                     VertexManagerBase* vertex_manager,
@@ -145,12 +155,6 @@ void GraphicsModBackend::CustomDraw(const DrawDataView& draw_data,
 {
   auto& system = Core::System::GetInstance();
   auto& vertex_shader_manager = system.GetVertexShaderManager();
-
-  Common::SmallVector<u32, 8> texture_units;
-  for (const auto& texture : draw_data.textures)
-  {
-    texture_units.push_back(texture.unit);
-  }
 
   CustomPixelShaderContents custom_pixel_shader_contents;
   std::optional<CustomPixelShader> custom_pixel_shader;
@@ -160,9 +164,7 @@ void GraphicsModBackend::CustomDraw(const DrawDataView& draw_data,
   bool more_data = true;
   u32 mesh_index = 0;
   std::optional<GraphicsModActionData::MeshChunk> mesh_chunk;
-  GraphicsModActionData::DrawStarted draw_started{texture_units,
-                                                  *VertexLoaderManager::GetCurrentVertexFormat(),
-                                                  draw_data.vertex_data,
+  GraphicsModActionData::DrawStarted draw_started{draw_data,
                                                   VertexLoaderManager::g_current_components,
                                                   &skip,
                                                   &custom_pixel_shader,
@@ -208,5 +210,21 @@ void GraphicsModBackend::CustomDraw(const DrawDataView& draw_data,
     vertex_manager->DrawEmulatedMesh(custom_pixel_shader_contents, custom_transform,
                                      custom_pixel_shader_uniforms);
   }
+}
+
+DrawCallID GraphicsModBackend::GetSkinnedDrawCallID(DrawCallID draw_call_id, MaterialID material_id,
+                                                    const DrawDataView& draw_data)
+{
+  const bool is_draw_gpu_skinned =
+      IsDrawGPUSkinned(draw_data.vertex_format, draw_data.rasterization_state.primitive);
+  if (is_draw_gpu_skinned && m_last_draw_gpu_skinned && m_last_material_id == material_id)
+  {
+    draw_call_id = m_last_draw_call_id;
+  }
+  m_last_draw_call_id = draw_call_id;
+  m_last_material_id = material_id;
+  m_last_draw_gpu_skinned = is_draw_gpu_skinned;
+
+  return draw_call_id;
 }
 }  // namespace GraphicsModSystem::Runtime
